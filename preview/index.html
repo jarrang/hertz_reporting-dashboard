@@ -1,0 +1,1033 @@
+<!doctype html>
+<!--
+HERTZ EMEA | REGIONAL REPORTING CLOUDPAGE CONCEPT | v4.0 | 15 September 2026
+
+INSTALL: Paste this complete file into a CloudPages HTML/code landing page.
+Also opens locally. SAMPLE ONLY: no SSJS, AMPscript, external dependencies,
+tracking or network data calls. This update changes no DEs or source records.
+
+DEVELOPER NOTE: SAMPLE LATENCY
+CONFIG.demoLoading.enabled disables the sample-only waits (8000/5000/3000 ms
+for report/audience/links). These are unmeasured illustrative values, not an SFMC
+performance forecast. No timing controls or simulation labels appear in the UI.
+Loading starts automatically through the same provider boundary as remote mode.
+The initial page shell contains no reporting DE retrievals. In remote mode the
+browser requests separate authenticated JSON endpoints after receiving the shell;
+those endpoints perform bounded SFMC retrievals. No iframe is required. Embedding
+all retrievals in the initial page instead would delay that page's response.
+Initial hosting/authentication latency is not modelled. Live endpoints remain
+unimplemented. Delays never apply outside sample mode; cache hits remain immediate.
+
+MAINTENANCE MAP
+1. CONFIG: region/stage token mappings, filter defaults, endpoints and payload limits.
+2. Transport + DemoLoading + DataProvider: queued loads, sample delays and validation.
+3. Naming + Report: classify EmailName, filter jobs, calculate weighted metrics.
+4. Metrics / Chart / Campaigns / Audience: display-only modules.
+5. Filters + App: URL state, accessible controls and events.
+
+REGION / SEND STAGE - VERIFIED AGAINST THE HERTZ UTM GENERATOR
+Source: Hertz Corp CRM Encyclopedia for UTMS_05.15.26.xlsx, sheets
+'UTM Campaign Naming Conventions', 'UTM Generator' and 'UTM Generator 2026'.
+Sequence codes include PNT and RM; PNT = Parent, RM = Remail (also confirmed by Rob).
+2026 generated output starts V1_H_REGION_SEQUENCE_Email_...; parse the generated
+string, not the sheet's input-header order (Channel appears before Sequence there).
+Rob's V2 example uses the same prefix. Current parser requires the EMAIL token
+following the sequence, so campaign-name words cannot be mistaken for a stage.
+Legacy output: H_REGION_CATEGORY_SUBCATEGORY_SEGMENT_[AFFILIATION]_SEQUENCE_DATE_...
+For these recognised category prefixes, read the sequence immediately before the
+first YYYYMMDD token in the bounded header positions. Do not search descriptions.
+Region always comes from the exact token after H; known EUxx mappings are in CONFIG.
+PNT/RM in a subject, URL or campaign description does NOT classify the send.
+Unknown regions/stages stay unclassified and included in their respective All view.
+TEM/JEM/other sequences are not reclassified as Parent or Remail. The reporting
+scope must separately exclude ongoing triggered jobs before period aggregation.
+No source DE field is added or changed.
+
+DIRECT READ DESIGN - NO ADDITIONAL DATA PREPARATION
+Use existing RPT_Dim_Job and RPT_Agg_JobSummary only for campaign reporting.
+The browser loads consecutive joined batches from the report endpoint, then renders
+only after all eligible jobs and matching summaries are confirmed complete. The
+60-row recent table limit never limits totals. No partial report is displayed.
+Retrieve the full maximum period plus comparison (180 days for current controls).
+No new DE, automation, scheduled aggregate or persistent cache is required.
+
+REMOTE BATCH CONTRACT (endpoint implementation still required)
+Each response is {schemaVersion:2,meta:Meta,jobs:Job[],audience:null,nextCursor:null|string}.
+First request passes horizonDays=180. Later requests also pass cursor. The endpoint
+must pin throughDate and coverageStart on the first request and retain them across
+batches. meta.jobsComplete is false while nextCursor is non-null and true only on
+the final batch after exhausting eligible jobs and resolving every summary.
+All meta values except jobsComplete must remain identical across batches.
+Use bounded WSProxy date-filtered job retrieval, batched summary JobID filters and
+server-memory joins. Finish summaries for a job batch before emitting its jobs.
+No one-request-per-job pattern. No raw-event or subscriber scans.
+The continuation must be opaque, integrity-protected, expiring and scoped to the
+authenticated user/BU/window; never accept raw client-chosen DE keys or SOAP IDs.
+WSProxy getNextBatch supports continuation; its lifetime across published endpoint
+requests and the chosen authentication/continuation mechanism require tenant tests.
+On expired continuation restart manually; never merge a restarted result into old
+batches. Existing automations can update records during retrieval: this is not an
+atomic historical snapshot. LastRecalculated remains the source freshness field.
+
+Safety limits are failure thresholds, not report truncation: 100 batches, 100000
+joined rows and 64 MiB cumulative JSON. These provisional limits are not approved
+API budgets or throughput claims. Individual requests retain their timeout/byte
+limits. Any failure, missing summary, duplicate job, cursor cycle or incomplete
+coverage prevents the entire campaign report from rendering. Set realistic limits
+after measurement; do not silently drop rows or display partial totals.
+
+Audience is requested separately from the three existing snapshot DEs for one
+aligned date. The subscriber engagement panel is removed: it would require a large
+RPT_Sub_Engagement scan or additional preparation. Journey inventory can use a
+bounded deduplicated RPT_Dim_JourneyMap extract; unavailable is supported.
+Links are requested separately from RPT_Agg_LinkPerformance for one JobID.
+Successful details are cached for this page visit. Region/stage filters and period
+changes reuse the complete campaign dataset. Regional audience remains unavailable.
+Live endpoints and authentication are not implemented by this browser-only file.
+
+PRIMARY PAYLOAD CONTRACT (schemaVersion: 2; additive LastRecalculated field in v3.1)
+{
+ schemaVersion: 2,
+ meta: {
+   generatedAt: payload retrieval time, ISO timestamp with Z or explicit offset,
+   throughDate: 'YYYY-MM-DD', coverageStart: 'YYYY-MM-DD',
+   timeZone: 'Europe/London', jobsComplete: boolean,
+   campaignScope: 'completed-one-off'
+ },
+ jobs: [Job],
+ audience: null OR {snapshotDate, database, personas, segments, engagement, journeys}
+}
+Job = {JobID, EmailName, EmailSubject, PickupTime: ISO timestamp with offset,
+       Sends, Delivered, Bounces, UniqueOpens, UniqueClicks, Unsubscribes,
+       Complaints, LastRecalculated: source ISO timestamp OR null,
+       links: null OR [Link], linksComplete?: boolean}
+LastRecalculated comes from the EXISTING RPT_Agg_JobSummary field. Include it in
+the same summary retrieval; no extra read or new DE field is needed. Missing
+values in older schemaVersion 2 payloads remain supported but freshness is unknown.
+generatedAt must never substitute for a missing source recalculation timestamp.
+Optional displayName is a friendly label only; NEVER use it for classification.
+Link = {LinkName, URL, UniqueClicks, TotalClicks}.
+Set linksComplete=true only for an exhaustive link list. Otherwise the detail
+heading explicitly says 'Loaded links'. Missing links=null displays unavailable.
+Normalise API number strings to non-negative integers in the server adapter.
+Rates are recomputed from counts; no pre-existing rate scale is assumed.
+Database = {TotalSubscribers, ActiveCount, BouncedCount, HeldCount, UnsubscribedCount}
+Personas = [{Persona, Contacts}]; segments = [{SegmentKey, SegmentSize, MailableSize}]
+Engagement = null OR {profiled, clicked90, sent90NoClick, notSent90}
+Journeys = [{JourneyID, JourneyName, VersionNumber, JourneyStatus}]
+Journey inventory must be distinct by JourneyID + VersionNumber, not activity row.
+Use an aligned audience snapshot date. Unknown subscriber statuses require an
+explicit additional category rather than being silently assigned to Active.
+
+This release retains the v1 scope: COMPLETED ONE-OFF SENDS grouped by PickupTime
+in the reporting timezone, with lifetime job metrics at each LastRecalculated. Ongoing
+triggered jobs can span dates and must not be placed into event-period metrics
+using job PickupTime. Verify exclusion rules against real SendType/JobStatus/
+triggered-send fields in the future adapter; no magic string rule is assumed here.
+No conversion, revenue, recipient-country or cross-job unique-person metric is
+inferred from the available aggregates. Sum unique counts per job only.
+
+SECURITY / SHARING
+Set dataMode='remote' only after implementing approved same-origin JSON endpoints.
+'embedded' remains a compatibility mode; any server-side payload generation there
+blocks the HTML response, so it is not the preferred performance option.
+It must authenticate users BEFORE serialising business data, expose no secrets
+or subscriber records, convert SFMC dates to an explicit timezone, and escape
+<, >, &, U+2028 and U+2029 as Unicode escapes in embedded JSON. Fail closed.
+URL filters (?region=FR&stage=PARENT&period=30) are view preferences, NOT access
+control. The browser payload may contain all loaded regions. Enforce any regional
+access permissions on the server before generating a restricted user's payload.
+'Copy view link' uses CONFIG.shareBaseUrl, the vetted canonical published page
+address, plus filters. Live sharing stays disabled until this address is set.
+Only static public routing parameters belong in that config, never credentials.
+Runtime query parameters, encrypted qs and subscriber context are not copied.
+A local file URL is not shareable, so copy is disabled locally.
+
+API ESTIMATE
+This sample concept: zero SFMC/data API calls. Filtering, sorting, pagination,
+charts, exports and view links cause zero additional reads. Explicit first-time
+audience and per-job link loads will make separate bounded reads in live mode.
+Live initial load still needs a separately approved budget. WSProxy uses SOAP;
+HasMoreRows requires pagination. Estimate actual bounded requests, not simply
+number of DEs. Daily API calls = page loads x calls_per_initial_payload + any
+explicit uncached detail/refresh calls. Do not equate native DE lookups with
+SOAP/REST licensing accounting without checking the account's arrangements.
+No exact live call count is promised. No stored regional aggregates are required.
+
+OPTIONAL QUERY STUDIO INSPECTION (read-only, not executed in your SFMC tenant)
+This is a bounded name/metric sample, not a complete-period data source. It does
+not enforce the one-off scope or certify coverage. Confirm JobID uniqueness and
+BU visibility before use. Use full EmailName values to verify the remail token.
+
+SELECT TOP 60
+    j.JobID, j.EmailName, j.EmailSubject, j.PickupTime,
+    j.SendType, j.JobStatus, j.TriggeredSendCustomerKey,
+    j.TriggererSendDefinitionObjectID,
+    a.Sends, a.Delivered, a.Bounces, a.UniqueOpens, a.UniqueClicks,
+    a.Unsubscribes, a.Complaints, a.LastRecalculated
+FROM [RPT_Dim_Job] j
+INNER JOIN [RPT_Agg_JobSummary] a ON j.JobID = a.JobID
+WHERE j.PickupTime IS NOT NULL
+ORDER BY j.PickupTime DESC, j.JobID DESC
+
+DEFERRED JSON CONTRACTS (primary report retains schemaVersion: 2)
+Primary: the paginated remote batch contract above, with audience=null and each job.links=null.
+Audience: {audience: AudienceObject OR null}. Snapshot date is explicit and must be
+at or before the report through-date; pass throughDate to the authenticated endpoint.
+Links: {JobID: number, links: Link[], linksComplete: boolean, retrievedAt: ISO timestamp}.
+retrievedAt describes when this detail was retrieved, NOT an historical as-of time.
+Link values may have advanced since the primary report; the UI labels retrieval time.
+No cross-endpoint transaction or consistent historical snapshot is claimed.
+
+SFMC IMPLEMENTATION AUDIT - BACKEND REQUIREMENTS, NOT INSTALLED CODE
+This file contains BROWSER JavaScript, not an SSJS endpoint. Do not add a runat
+server attribute to the existing scripts. Keep future server scripts separate,
+using conservative var/functions/loops and supported Platform/WSProxy APIs.
+Do not move fetch, Promise, Map, Intl, DOM code or async/await into SFMC SSJS.
+
+Hosting and output:
+- Use published CloudPages JSON Code Resources for the three endpoint contracts,
+  on the same HTTPS origin as the page. Configure their actual published URLs;
+  /api-style paths in local tests are not routes that SFMC creates automatically.
+- Keep endpoint output JSON-only: no template, tracking markup, debug Write(),
+  HTML error output or raw SSJS exceptions. Emit a single serialised response.
+- Verify Content-Type: application/json; charset=utf-8 and server response
+  Cache-Control: private, no-store. The browser's cache option alone does not
+  configure SFMC or intermediaries. No shared data cache is implemented here.
+- Return suitable HTTP errors where the host supports them. Also support the
+  JSON failure envelope {ok:false,error:{code:'TEMPORARY_UNAVAILABLE'}} even on
+  HTTP 200. Allowed codes: UNAUTHORISED, FORBIDDEN, RATE_LIMITED,
+  TEMPORARY_UNAVAILABLE. Optional error.retryAfterSeconds is a nonnegative integer.
+  HTTP 429/503 may specify Retry-After as seconds or an HTTP date. No raw message
+  from the endpoint is rendered. UI timers only unlock retry, never auto-fetch.
+
+Retrieval:
+- For batched SOAP reads prefer native WSProxy to legacy SSJS SOAP wrappers.
+  Use DataExtensionObject[external CustomerKey], explicit column projections,
+  date-window filters for jobs and batched JobID filters for their summaries.
+  Names, external keys and business-unit context must be verified, not guessed.
+- SOAP DE retrieves do not support LIKE. Do not build an EmailName LIKE '%EUFR%'
+  retrieve filter. This concept parses exact naming tokens within the loaded set.
+- Inspect response Status, Results and HasMoreRows. A SOAP failure may be a status
+  result instead of a thrown exception. Continue via getNextBatch only within the
+  server call/page/row/elapsed-time budget, checking that budget before each call.
+- BatchSize is a request, not a guarantee of exactly that many returned rows.
+  Never use unbounded pagination or an unfiltered Rows.Retrieve followed by slice.
+  No SOAP join is assumed. Join the bounded two-DE results in server memory.
+- Count skipped/missing summaries as incomplete, not zero. Guard duplicate JobIDs
+  and numeric string conversion. If duplicate keys or invalid counts make the
+  cohort ambiguous, return an error. Never silently present it as complete.
+- A partial SOAP page is not guaranteed to be the newest N jobs. Use date bounds
+  and finish all eligible batches before rendering totals.
+- Small snapshot lookups must select one aligned date. LookupOrderedRows has a
+  2,000-row ceiling and equality-style search arguments, not arbitrary SQL.
+  Resolve overflow explicitly. Core DE functions do not support enterprise DEs;
+  validate the owning BU and chosen API's visibility. Do not enable QueryAllAccounts
+  or accept a MID/DE key supplied by a browser request.
+- Page requests must not start SQL Query Activities, scan events/subscribers,
+  recalculate metrics, call themselves over HTTP, or perform per-job SOAP lookups.
+  No new DE, automation, external cache or server logging store is created here.
+
+Dates, authentication and delivery:
+- Verify how the existing DE automations store dates. SFMC system time is fixed
+  CST (UTC-6, no DST), but custom DE dates may already have been transformed.
+  Convert exactly once to explicit ISO timestamps. Do not append Z to local
+  strings or infer Europe/London from the account/user's configured timezone.
+  Keep date-only snapshots as calendar dates. Sort timestamps by instant.
+- Cookie credentials in fetch do not create authentication. Enforce the agreed
+  staff identity and permitted markets independently on EVERY endpoint, before
+  DE reads, including each requested JobID. SFMC editor roles, encrypted email
+  links, CORS and noindex are not staff access control. Return only authorised data.
+- Validate jobId and throughDate on the server with allowlisted types/ranges.
+  Reject unsupported methods and invalid inputs before retrieval. Client checks
+  improve display reliability; they are never the security boundary.
+- Set appropriate response headers on published pages/resources. Do not paste a
+  default-src 'self' CSP unchanged: it blocks this concept's inline JS/CSS and
+  data-URI logo. Design a tested hash/nonce policy and allow the required image,
+  connection and style sources, including existing inline style attributes.
+  Test the published response, not just CloudPages editor preview.
+- A browser timeout cannot terminate running SSJS. Neither a Script Activity's
+  30-minute limit nor Script.Util.HttpRequest's 30-second outbound limit is a
+  CloudPage load-time guarantee. Measure actual server latency and SOAP calls.
+  Request serialisation is per page, not a cross-user or cross-tab rate limiter.
+
+VALIDATION FOR v3.1
+Local Chromium checks covered sample mode, regional/PNT/RM filters, deferred reads,
+in-flight deduplication, cached detail reuse, one active browser data request,
+429 cooldown without automatic retry, report retry without document reload,
+401 and JSON error envelopes, malformed JSON/MIME, redirects, oversized bodies,
+timeouts, stale/missing source dates, mixed-offset date sorting, summer/winter
+report dates, invalid payloads and mobile overflow. No uncaught browser errors.
+These are browser tests with simulated endpoints, not an SFMC execution or load
+test. Tenant validation must measure published endpoint latency, actual bounded
+SOAP calls/pages, BU access, response headers, auth and automation refresh timing.
+
+REFERENCES
+https://developer.salesforce.com/docs/marketing/marketing-cloud/guide/ssjs_syntaxGuide.html
+https://developer.salesforce.com/docs/marketing/marketing-cloud/guide/ssjs_WSProxy_basic_retrieve.html
+https://developer.salesforce.com/docs/marketing/marketing-cloud/guide/ssjs_platformDataExtensionLookupOrderedRows.html
+https://developer.salesforce.com/docs/marketing/marketing-cloud/guide/ssjs_WSProxy_useSSJS.html
+https://developer.salesforce.com/docs/marketing/marketing-cloud/guide/ssjs_WSProxy_advanced_retrieve.html
+https://developer.salesforce.com/docs/marketing/marketing-cloud/guide/ssjs_error_handling.html
+https://developer.salesforce.com/docs/marketing/marketing-cloud/guide/retrieving_data_from_a_data_extension.html
+https://developer.salesforce.com/docs/marketing/marketing-cloud/guide/ssjs_dataExtensionFunctions.html
+https://developer.salesforce.com/docs/marketing/marketing-cloud/guide/ssjs_dateTimeSystemDateToLocalDate.html
+https://help.salesforce.com/s/articleView?id=mktg.mc_cp_use_a_code_resource.htm&language=en_US&type=5
+https://help.salesforce.com/s/articleView?id=002743057&language=en_US&type=1
+https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Retry-After
+https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/script-src
+https://www.w3.org/WAI/tutorials/tables/
+Brand reference: supplied Hertz Brand Guidelines, February 2025. Embedded logo
+is extracted from the supplied primary artwork. No external font is downloaded.
+-->
+
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Hertz | EMEA email reporting</title>
+<script>
+'use strict';
+/* 1. EDITABLE CONFIGURATION. Theme values live in :root immediately below. */
+const CONFIG = Object.freeze({
+  dataMode: 'sample', // 'sample', 'remote' (recommended live), or 'embedded'; no live fallback
+  demoLoading: Object.freeze({
+    enabled: true, // Set false to remove ALL artificial waits. Ignored outside sample mode.
+    delaysMs: Object.freeze({report:8000,audience:5000,links:3000}) // Illustrative, not measured.
+  }),
+  title: 'Email performance',
+  regionLabel: 'EMEA',
+  locale: 'en-GB',
+  reportingTimeZone: 'Europe/London', // Convert SFMC system dates upstream; do not just append Z.
+  defaultPeriod: 30,
+  periods: [7, 30, 90],
+  pageSize: 6,
+  recentCampaignLimit: 60, // Applied AFTER region, stage and date filters.
+  maxReportRows: 100000, // Failure guard only; NEVER truncate report totals.
+  maxReportBatches: 100,
+  maxReportBytes: 64 * 1024 * 1024,
+  maxLinksPerJob: 10,
+  maxAudienceItems: 100, // Per persona/segment/journey array; reject oversized optional panels.
+  defaultRegion: 'ALL',
+  defaultStage: 'ALL',
+  regions: Object.freeze({EUGB:{code:'GB',label:'United Kingdom'},EUFR:{code:'FR',label:'France'},
+    EUDE:{code:'DE',label:'Germany'},EUIT:{code:'IT',label:'Italy'},EUES:{code:'ES',label:'Spain'},
+    EUNO:{code:'NO',label:'Norway'},EUSE:{code:'SE',label:'Sweden'},EUNL:{code:'NL',label:'Netherlands'},
+    EUBE:{code:'BE',label:'Belgium'},EULU:{code:'LU',label:'Luxembourg'}}),
+  stageTokens: Object.freeze({PNT:'PARENT',RM:'REMAIL'}), // Verified generator Sequence codes.
+  legacyCategories: Object.freeze(['ACQ','RET','BRD','LYL','TXN','LOYALTY']),
+  endpoints: Object.freeze({report:'',audience:'',links:''}), // Leave empty until approved endpoints exist.
+  requestTimeoutMs: 10000, // UX deadline, not an SFMC execution limit.
+  retryCooldownMs: 5000, // Manual retry delay after a failed request; no automatic fetch.
+  rateLimitCooldownMs: 30000, // Used only when a throttled response omits Retry-After.
+  maxResponseBytes: 500000, // Applies separately to each decoded JSON response.
+  shareBaseUrl: '', // Published canonical HTTPS page URL. Required for live Copy view link.
+  stageLabels: Object.freeze({PARENT:'Parent',REMAIL:'Remail',UNKNOWN:'Unclassified'}),
+  staleAfterHours: 36,
+  sampleThroughDate: '2026-09-13',
+  sampleGeneratedAt: '2026-09-14T05:00:00Z',
+  exportFilename: 'Hertz-EMEA-campaigns'
+});
+</script>
+<style>
+:root{--gold:#ffcc00;--ink:#161616;--muted:#63635e;--paper:#f6f6f3;--surface:#fff;--line:#e5e5de;--teal:#0a7986;--green:#276449;--red:#a3342c;--radius:14px;--sidebar:196px;--font:'Open Sans',Arial,sans-serif}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:28px}body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.5 var(--font);-webkit-font-smoothing:antialiased}button,input,select{font:inherit}button,select{cursor:pointer}button,a,input,select,summary{touch-action:manipulation}button{color:inherit}a{color:inherit}button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:10px 14px;min-height:42px}button:hover{border-color:#8b8b82;background:#fafaf7}button:disabled{cursor:default;opacity:.45}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid var(--teal);outline-offset:3px}h1,h2,h3,p{margin:0}h1{font-size:34px;line-height:1.2;letter-spacing:-1.2px}h2{font-size:18px;letter-spacing:-.35px}h3{font-size:14px}svg{display:block}small,.small{font-size:12px}.muted{color:var(--muted)}.eyebrow{font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase}.sr-only{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.skip{position:fixed;left:16px;top:-80px;background:var(--ink);color:white;padding:12px;z-index:100}.skip:focus{top:12px}[hidden]{display:none!important}
+.sidebar{position:fixed;inset:0 auto 0 0;width:var(--sidebar);background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;padding:28px 18px;z-index:10}.brand{background:var(--gold);width:122px;height:62px;display:flex;align-items:center;justify-content:center;border-radius:3px;margin:0 0 30px 12px}.brand img{width:112px;height:auto;display:block}.workspace-label{padding:0 14px 19px}.workspace-label strong{display:block;font-size:14px;margin-top:4px}.nav{display:grid;gap:6px}.nav a{text-decoration:none;display:flex;gap:12px;align-items:center;padding:12px 14px;border-radius:8px;color:var(--muted);font-weight:600}.nav a svg{width:18px;height:18px;flex:none}.nav a.active{background:#fff6ce;color:var(--ink)}.nav a:hover{background:var(--paper)}.sidebar-bottom{margin-top:auto;border-top:1px solid var(--line);padding:18px 12px 0}.badge{white-space:nowrap;display:inline-flex;align-items:center;gap:7px;font-size:11px;border:1px solid #e0cb6e;border-radius:5px;background:#fff9de;padding:4px 8px;font-weight:700}.badge::before{content:'';height:6px;width:6px;border-radius:50%;background:#927300}.sidebar-bottom p{margin-top:9px;line-height:1.6}
+.main{margin-left:var(--sidebar);padding:0 38px 28px;max-width:1650px}.topbar{height:77px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:20px}.breadcrumb{font-size:12px;color:var(--muted)}.breadcrumb span{margin:0 9px;color:#888}.topbar-right{display:flex;align-items:center;gap:15px}.roundel{border:1px solid var(--line);border-radius:50%;background:#fff;width:32px;height:32px;display:grid;place-items:center;font-size:11px;font-weight:700}.hero{padding:31px 0 25px;display:flex;justify-content:space-between;align-items:flex-end;gap:24px}.hero .eyebrow{margin-bottom:9px;color:var(--muted)}.hero p{margin-top:10px;color:var(--muted)}.primary{background:var(--ink);border-color:var(--ink);color:#fff}.primary:hover{background:#383833;border-color:#383833}.button-icon{display:inline-flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap}.button-icon svg{width:16px;height:16px}.filterbar{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:22px}.period-control{display:flex;align-items:center;gap:12px}.select-wrap{display:flex;align-items:center;gap:9px}select,input{border:1px solid #cecec5;border-radius:8px;background:#fff;padding:10px 12px;color:var(--ink);min-height:42px}select{padding-right:26px}.date-range{font-size:12px;color:var(--muted)}.text-button{border:0;background:none;text-decoration:underline;text-underline-offset:3px;padding:8px 0;font-size:12px;color:var(--muted)}.text-button:hover{background:none}.notice{background:#fff4d2;border:1px solid #d9c479;padding:12px 16px;border-radius:9px;margin-bottom:16px}.error{background:#fff3f1;border-color:#d7b0aa}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:15px;margin-bottom:20px}.kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:21px 20px 18px;position:relative}.kpi.featured{border-top:3px solid var(--gold);padding-top:19px}.kpi-title{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:12px;font-weight:600}.kpi-title svg{height:17px;width:17px;color:#85857c}.kpi-value{font-size:31px;font-weight:700;line-height:1.2;letter-spacing:-1px;margin:14px 0 10px;font-variant-numeric:tabular-nums}.kpi-detail{font-size:11px;color:var(--muted);margin-top:6px}.delta{font-size:11px;font-weight:600}.delta.positive{color:var(--green)}.delta.negative{color:var(--red)}.comparison-note{font-size:11px;color:var(--muted);margin:-7px 0 21px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}.panel-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;padding:22px 24px 0}.panel-heading p{font-size:12px;color:var(--muted);margin-top:5px}.chart-grid{display:grid;grid-template-columns:minmax(0,2.3fr) minmax(235px,1fr);gap:20px;margin-bottom:28px}.segmented{display:flex;background:var(--paper);padding:3px;border-radius:8px;gap:2px}.segmented button{border:0;min-height:33px;padding:6px 10px;background:transparent;font-size:11px;color:var(--muted);white-space:nowrap}.segmented button[aria-pressed=true]{background:#fff;color:var(--ink);box-shadow:0 1px 4px #00000012}.chart{padding:15px 20px 0}.chart svg{width:100%;height:216px;overflow:visible}.chart-caption{display:flex;gap:14px;justify-content:space-between;padding:0 24px 16px;font-size:11px;color:var(--muted)}.legend{display:inline-flex;align-items:center;gap:6px}.legend::before{content:'';display:inline-block;width:16px;height:3px;background:var(--ink)}.chart-table{margin:0 24px 20px;font-size:11px;color:var(--muted)}summary{cursor:pointer}.chart-table .table-scroll{max-height:230px;margin-top:10px}.health-body{padding:18px 24px 22px}.health-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--line);gap:12px}.health-row:last-of-type{border-bottom:0}.health-row span{font-size:12px;color:var(--muted)}.health-row strong{text-align:right;font-size:16px;font-variant-numeric:tabular-nums}.health-row small{display:block;font-size:10px;font-weight:400;color:var(--muted)}.health-note{padding-top:12px;font-size:11px;color:var(--muted)}
+.section{scroll-margin-top:24px;margin-top:28px}.section-header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:15px}.section-header p{font-size:12px;color:var(--muted);margin-top:4px}.table-tools{display:flex;align-items:center;gap:10px}.search{width:230px}.table-scroll{overflow-x:auto}.scroll-hint{display:none}table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:right;color:var(--muted);background:#fafaf7;font-size:10px;letter-spacing:.6px;text-transform:uppercase;font-weight:600;padding:13px 18px;border-bottom:1px solid var(--line);white-space:nowrap}th:first-child,td:first-child{text-align:left}td{text-align:right;padding:15px 18px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap}tbody tr:last-child td{border-bottom:0}tbody tr:hover{background:#fffdf5}.campaign-name{border:0;background:transparent;padding:0;min-height:34px;text-align:left;display:block;font-weight:600;white-space:normal;max-width:310px;line-height:1.4;color:var(--ink)}.campaign-name:hover{background:transparent;text-decoration:underline;text-underline-offset:3px}.campaign-meta{font-size:10px;color:var(--muted);margin-top:2px}.rate-pill{background:#f1f6f3;color:#24523c;padding:4px 7px;border-radius:4px;font-weight:600}.table-footer{padding:13px 20px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:15px;align-items:center;color:var(--muted);font-size:11px}.pagination{display:flex;align-items:center;gap:10px}.pagination button{min-height:34px;padding:5px 10px;font-size:12px}.empty{padding:45px 20px;text-align:center;color:var(--muted)}
+.audience-heading{padding-top:6px}.snapshot-tag{background:#ecece6;border-radius:5px;padding:5px 9px;color:var(--muted);font-size:11px}.audience-grid{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:20px}.audience-content{padding:21px 24px 23px}.big-number{font-size:29px;letter-spacing:-.8px;font-weight:700;font-variant-numeric:tabular-nums}.stack{height:10px;display:flex;gap:2px;border-radius:8px;overflow:hidden;margin:18px 0}.stack span{min-width:2px}.status-list{list-style:none;padding:0;margin:0}.status-list li{display:flex;justify-content:space-between;font-size:12px;margin:11px 0;gap:10px}.status-label{display:flex;align-items:center;gap:8px;color:var(--muted)}.dot{width:7px;height:7px;border-radius:2px;display:inline-block;flex:none}.bar-row{margin-bottom:17px}.bar-label{display:flex;justify-content:space-between;font-size:12px;gap:10px;margin-bottom:7px}.bar-label span{color:var(--muted)}.bar-track{height:7px;background:#efefea;border-radius:4px;overflow:hidden}.bar-fill{height:100%;background:var(--teal);border-radius:4px;min-width:0}.footnote{font-size:11px;color:var(--muted);line-height:1.6}.audience-secondary{display:grid;grid-template-columns:1.2fr 1fr;gap:20px;margin-top:20px}.segment-count{font-variant-numeric:tabular-nums}.journey{padding:13px 0;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:16px}.journey:first-child{padding-top:0}.journey:last-child{border:0}.journey p{font-size:12px;font-weight:600}.journey small{font-size:10px;color:var(--muted)}.status-pill{align-self:center;background:#f0f4f1;color:#345440;border-radius:4px;padding:3px 7px;font-size:10px}.status-pill.neutral{background:#f0f0ec;color:#62625c}.footer{display:flex;justify-content:space-between;gap:20px;color:var(--muted);font-size:11px;margin-top:30px;padding-top:20px;border-top:1px solid var(--line)}
+dialog{border:1px solid var(--line);border-radius:16px;box-shadow:0 20px 80px #0003;width:min(760px,calc(100vw - 32px));max-height:88vh;padding:0;color:var(--ink)}dialog::backdrop{background:#15151080}.dialog-head{display:flex;justify-content:space-between;gap:20px;padding:24px;border-bottom:1px solid var(--line);align-items:flex-start}.dialog-head h2{font-size:22px}.dialog-head button{flex:none}.dialog-body{padding:24px}.dialog-body p{margin-bottom:14px}.dialog-body dl{margin:0}.dialog-body dt{font-weight:700;font-size:13px;margin-top:17px}.dialog-body dd{margin:5px 0 0;color:var(--muted);font-size:13px}.detail-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:22px 0}.detail-metrics div{background:var(--paper);padding:14px;border-radius:8px}.detail-metrics span{display:block;color:var(--muted);font-size:11px}.detail-metrics strong{display:block;font-size:21px;margin-top:4px}.detail-name{font-family:monospace;overflow-wrap:anywhere;font-size:11px;background:var(--paper);padding:12px;border-radius:6px}.link-url{display:block;color:var(--muted);font-size:10px;white-space:normal;overflow-wrap:anywhere;margin-top:4px}.dialog-body td:first-child{white-space:normal}.dialog-body .table-scroll{margin:12px 0}#announcement{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:white;padding:10px 16px;border-radius:8px;z-index:50;font-size:12px}
+@media(min-width:1700px){.main{margin-left:max(var(--sidebar),calc((100vw - 1450px)/2));max-width:1450px}}
+@media(max-width:1200px){.main{padding-left:24px;padding-right:24px}.chart-grid{grid-template-columns:minmax(0,1.8fr) minmax(220px,1fr)}.panel-heading{padding-left:20px;padding-right:20px}.chart-grid .panel-heading{flex-wrap:wrap}.kpi{padding-left:16px;padding-right:16px}.audience-grid{grid-template-columns:1fr 1fr}.audience-grid>.panel:first-child{grid-row:span 2}.audience-grid>.panel:last-child{grid-column:2}.kpi-value{font-size:27px}.table-tools{flex-wrap:wrap;justify-content:flex-end}.section-header{align-items:flex-start}}
+@media(max-width:960px){:root{--sidebar:160px}.sidebar{padding-left:12px;padding-right:12px}.brand{margin-left:5px}.main{padding-left:20px;padding-right:20px}.chart-grid{grid-template-columns:1fr}.health-body{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.health-row{display:block;border:0;padding:0}.health-row strong{display:block;text-align:left;margin-top:7px}.health-note{grid-column:1/-1;padding-top:0}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.audience-secondary{grid-template-columns:1fr}.section-header{flex-wrap:wrap}.hero{align-items:flex-start}h1{font-size:30px}}
+@media(max-width:700px){.scroll-hint{display:block;color:var(--muted);font-size:11px;padding:10px 18px;border-bottom:1px solid var(--line)}.sidebar{position:static;width:auto;padding:12px 18px;flex-direction:row;align-items:center;justify-content:space-between;border-right:0;border-bottom:1px solid var(--line);gap:10px}.brand{margin:0;width:88px;height:44px}.brand img{width:82px}.workspace-label,.sidebar-bottom{display:none}.nav{display:flex;gap:1px}.nav a{padding:10px;font-size:12px}.nav a svg{display:none}.main{margin-left:0;padding:0 16px 24px}.topbar{height:57px}.roundel{display:none}.topbar-right{gap:5px}.topbar-right .small{font-size:10px}.hero{padding-top:24px;flex-wrap:wrap;gap:16px}.hero p{font-size:12px}.hero>button{padding:8px 12px;min-height:38px;font-size:12px}.filterbar{align-items:flex-start;gap:10px}.period-control{align-items:flex-start;flex-direction:column;gap:8px}.date-range{font-size:11px}.kpis{gap:10px}.kpi{padding:16px 14px}.kpi.featured{padding-top:14px}.kpi-title{font-size:11px}.kpi-title svg{display:none}.kpi-value{font-size:27px}.kpi-detail,.delta{font-size:10px}.chart{padding:12px 10px 0}.chart svg{height:190px}.chart-caption{padding:0 18px 14px;gap:10px;flex-wrap:wrap}.panel-heading{padding:19px 18px 0}.health-body{padding:20px 18px;gap:12px}.health-row span{font-size:11px}.health-row strong{font-size:16px}.table-tools{width:100%;flex-wrap:nowrap}.search{width:100%;min-width:0}.table-tools select{max-width:160px}.table-footer{align-items:flex-start;flex-wrap:wrap}.audience-grid,.audience-secondary{grid-template-columns:1fr}.audience-grid>.panel:first-child{grid-row:auto}.audience-grid>.panel:last-child{grid-column:auto}.audience-content{padding:20px 18px}.snapshot-tag{font-size:10px}.footer{flex-direction:column;gap:8px}.detail-metrics{grid-template-columns:repeat(2,1fr)}.dialog-head,.dialog-body{padding:18px}.dialog-head h2{font-size:19px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+@media print{.sidebar,.topbar,.hero>button,.filterbar,.table-tools,.pagination,.text-button,.segmented,.chart-table,.footer,dialog{display:none!important}.main{margin:0;max-width:none;padding:0}.panel,.kpi{break-inside:avoid}.table-scroll{overflow:visible}body{background:white}.hero{padding-top:0}.chart-grid{grid-template-columns:2fr 1fr}}
+
+/* Regional controls and scope labels. Keep global theme in :root above. */
+.loading-panel{padding:32px;background:#fff;border:1px solid var(--line);border-radius:12px;color:var(--muted)}.link-load-panel{padding:20px;background:var(--paper);border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:16px;margin:14px 0}.link-load-panel p{font-size:12px;color:var(--muted);margin:0}.link-load-panel button{flex:none;font-size:12px}.job-label.stage-remail{background:#e9f4f4;color:#17616a}.chart-gap-note{font-size:10px;color:var(--muted);padding:0 24px 12px}.chart-gap-note:empty{display:none}.rate-chart+.chart-caption .legend::before{width:6px;height:6px;border-radius:50%}.regional-filters{background:#fff;border:1px solid var(--line);padding:17px 20px;border-radius:12px;align-items:center;margin-bottom:17px;flex-wrap:wrap}
+.filter-fields{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap}.filter-field{display:grid;gap:5px}.filter-field label{font-size:10px;color:var(--muted);font-weight:700;letter-spacing:.35px}.filter-field select{min-width:150px}.filter-field:nth-child(2) select{min-width:200px}.view-actions{display:flex;gap:16px;align-items:center}.view-actions button{font-size:11px}.view-actions button:disabled{opacity:.6}.scope-bar{display:flex;justify-content:space-between;gap:15px;align-items:center;margin:20px 0 5px}.scope-bar>div{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.scope-bar strong{font-size:16px}.scope-bar #scope-stage{font-size:12px;color:var(--muted);border-left:1px solid #ccc;padding-left:10px}.scope-note{font-size:11px;color:var(--muted);margin:0 0 18px}.naming-note{font-size:11px;color:var(--muted);padding:0 0 16px}.job-labels{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:5px}.job-label{font-size:10px;background:#f1f1ea;color:#55564d;border-radius:4px;padding:2px 6px}.job-label.stage-parent{background:#fff5c8;color:#64500c}.audience-unavailable{margin-top:28px;padding:24px;display:flex;justify-content:space-between;align-items:center;gap:24px}.audience-unavailable p{color:var(--muted);font-size:12px;margin-top:6px;max-width:660px}.audience-unavailable button{flex:none;font-size:12px}
+@media(max-width:1200px){.view-actions{width:100%;justify-content:space-between}.filter-field select{min-width:140px}}
+@media(max-width:700px){.regional-filters{padding:15px}.filter-fields{display:grid;grid-template-columns:1fr 1fr;width:100%;gap:12px}.filter-field select,.filter-field:nth-child(2) select{min-width:0;width:100%;font-size:12px}.filter-field:nth-child(2){grid-column:1/-1;grid-row:1}.filter-fields>.text-button{justify-self:start}.view-actions{gap:10px;flex-wrap:wrap}.scope-bar{align-items:flex-start;flex-direction:column;gap:7px}.audience-unavailable{align-items:flex-start;flex-direction:column;padding:20px}.scope-bar strong{font-size:16px}}
+@media print{.regional-filters,.audience-unavailable button{display:none!important}.scope-bar{margin-top:10px}}
+</style>
+</head>
+<body>
+<a class="skip" href="#overview">Skip to report</a>
+<aside class="sidebar" aria-label="Report navigation">
+  <a href="#overview" class="brand" aria-label="Hertz reporting overview"><img alt="Hertz" width="112" height="46" src="data:image/png;base64,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"></a>
+  <div class="workspace-label"><span class="eyebrow muted">Marketing intelligence</span><strong id="workspace-name">EMEA reporting</strong></div>
+  <nav class="nav">
+    <a href="#overview" class="active" aria-current="location"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Overview</a>
+    <a href="#campaigns"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 6 9 7 9-7"/></svg>Campaigns</a>
+    <a href="#audience" id="audience-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 5v2"/></svg>Audience</a>
+  </nav>
+  <div class="sidebar-bottom"><span class="badge" id="mode-badge">Sample data</span><p class="small muted" id="mode-note">Design concept<br>Illustrative figures only</p></div>
+</aside>
+<main class="main" id="overview" tabindex="-1">
+  <header class="topbar"><div class="breadcrumb">Hertz <span>/</span> <b id="breadcrumb-name">EMEA email reporting</b></div><div class="topbar-right"><span class="small muted" id="refresh-label">Loading report…</span><div class="roundel" aria-hidden="true">EU</div></div></header>
+  <div class="hero"><div><div class="eyebrow">The bigger picture</div><h1 id="report-title">Email performance</h1><p id="hero-description">A clear view of your campaigns, engagement and audience.</p></div><button class="primary button-icon" id="export" type="button" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"/></svg>Export campaigns</button></div>
+  <div id="report-loading" class="loading-panel" role="status">Loading campaign report…</div><div id="load-error" class="notice error" role="alert" hidden></div><button id="retry-report" type="button" hidden>Retry campaign report</button>
+  <noscript><p class="notice">Enable JavaScript to view and interact with this reporting concept.</p></noscript>
+  <div id="report-body" hidden>
+    <div id="stale-notice" class="notice" role="status" hidden></div>
+    <div class="filterbar regional-filters">
+      <div class="filter-fields">
+        <div class="filter-field"><label for="period">Period</label><select id="period"></select></div>
+        <div class="filter-field"><label for="region">Campaign region</label><select id="region"></select></div>
+        <div class="filter-field"><label for="stage">Send stage</label><select id="stage"></select></div>
+        <button id="reset-filters" class="text-button" type="button">Reset filters</button>
+      </div>
+      <div class="view-actions"><button id="copy-view" class="button-icon" type="button">Copy view link</button><button class="text-button" data-dialog="definitions" type="button">How to read this report</button></div>
+    </div>
+    <div class="scope-bar"><div><strong id="scope-name"></strong><span id="scope-stage"></span><span class="badge" id="sample-chip">Sample data</span></div><span class="date-range" id="period-label"></span></div>
+    <p class="scope-note" id="scope-note"></p>
+    <p class="scope-note" id="source-freshness"></p>
+    <div id="coverage-notice" class="notice" role="status" hidden></div>
+    <div id="naming-notice" class="naming-note" hidden></div>
+
+    <section class="kpis" aria-label="Campaign performance summary" id="kpis"></section>
+    <p class="comparison-note" id="comparison-label"></p>
+    <div class="chart-grid">
+      <section class="panel" aria-labelledby="trend-title"><div class="panel-heading"><div><h2 id="trend-title">Engagement over time</h2><p id="chart-subtitle">Click rate by campaign send date</p></div><div class="segmented" aria-label="Chart metric"><button type="button" data-chart="click" aria-pressed="true">Click rate</button><button type="button" data-chart="sends" aria-pressed="false">Sends</button><button type="button" data-chart="open" aria-pressed="false">Open rate</button></div></div><div class="chart" id="trend-chart"></div><div class="chart-caption"><span class="legend" id="chart-legend">Unique clicks / delivered</span><span id="chart-summary"></span></div><p class="chart-gap-note" id="chart-gap-note"></p><details class="chart-table"><summary>View chart data</summary><div class="table-scroll" tabindex="0" role="region" aria-label="Daily performance data" id="chart-data"></div></details></section>
+      <section class="panel" aria-labelledby="delivery-title"><div class="panel-heading"><div><h2 id="delivery-title">Delivery &amp; response</h2><p>For the selected campaign cohort</p></div></div><div class="health-body" id="health"></div></section>
+    </div>
+    <section class="section" id="campaigns" aria-labelledby="campaigns-title"><div class="section-header"><div><h2 id="campaigns-title">Recent campaigns</h2><p id="campaign-scope"></p></div><div class="table-tools"><label class="sr-only" for="search">Search loaded campaigns by name, subject or job ID</label><input type="search" id="search" class="search" placeholder="Search campaigns or job ID" maxlength="160"><label class="sr-only" for="sort">Sort loaded campaigns</label><select id="sort"><option value="newest">Newest first</option><option value="click">Highest click rate</option><option value="sends">Largest sends</option></select></div></div><div class="panel"><p class="scroll-hint">Scroll the table sideways to see all metrics.</p><div class="table-scroll" tabindex="0" role="region" aria-label="Recent campaign performance"><table><caption class="sr-only">Recent completed one-off sends and their lifetime performance to each summary's last recalculation</caption><thead><tr><th scope="col">Campaign / send date</th><th scope="col">Sent</th><th scope="col">Delivered</th><th scope="col">Open rate</th><th scope="col">Click rate</th><th scope="col">Unsub. rate</th></tr></thead><tbody id="campaign-rows"></tbody></table></div><div class="empty" id="campaign-empty" hidden>No matching campaigns. Try another name or job ID.</div><div class="table-footer"><span id="table-count" role="status" aria-live="polite"></span><div class="pagination"><button id="prev" type="button" aria-label="Previous campaign page">←</button><span id="page-label"></span><button id="next" type="button" aria-label="Next campaign page">→</button></div></div></div></section>
+    <section class="audience-unavailable panel" id="audience-loader" hidden><div><h2>Audience overview</h2><p id="audience-load-note" role="status">Load the latest All EMEA audience snapshot when you need it.</p></div><button id="load-audience" type="button">Load audience snapshot</button></section>
+    <section class="audience-unavailable panel" id="audience-filtered" hidden><div><h2>Audience overview</h2><p>Audience and journey snapshots are available in the All EMEA, all-stages view. They cannot be split by campaign name.</p></div><button id="show-all" type="button">View All EMEA</button></section>
+    <section class="section" id="audience" aria-labelledby="audience-title"><div class="section-header audience-heading"><div><h2 id="audience-title">All EMEA audience, at a glance</h2><p>Latest snapshot across All EMEA. Independent of the campaign period.</p></div><span class="snapshot-tag" id="snapshot-date"></span></div><div class="audience-grid">
+      <section class="panel" aria-labelledby="database-title"><div class="panel-heading"><div><h3 id="database-title">Subscriber database</h3><p>Current subscription status</p></div></div><div class="audience-content" id="database"></div></section>
+      <section class="panel" aria-labelledby="persona-title"><div class="panel-heading"><div><h3 id="persona-title">Persona mix</h3><p>Einstein Engagement Scoring</p></div></div><div class="audience-content" id="personas"></div></section>
+    </div><div class="audience-secondary">
+      <section class="panel" aria-labelledby="segments-title"><div class="panel-heading"><div><h3 id="segments-title">Segment reach</h3><p>Mailable contacts within each segment</p></div></div><div class="audience-content" id="segments"></div></section>
+      <section class="panel" aria-labelledby="journeys-title"><div class="panel-heading"><div><h3 id="journeys-title">Journey inventory</h3><p>Distinct journey versions in the latest extract</p></div></div><div class="audience-content" id="journeys"></div></section>
+    </div></section>
+    <footer class="footer"><span id="footer-scope"></span><span id="footer-brand">Hertz · EMEA marketing intelligence</span></footer>
+  </div>
+</main>
+<dialog id="details-dialog" aria-labelledby="details-title"><div class="dialog-head"><div><div class="eyebrow muted" style="margin-bottom:6px">Campaign detail</div><h2 id="details-title"></h2></div><button type="button" data-close aria-label="Close campaign detail">✕</button></div><div class="dialog-body" id="details-body"></div></dialog>
+<dialog id="definitions-dialog" aria-labelledby="definitions-title"><div class="dialog-head"><h2 id="definitions-title">How to read this report</h2><button type="button" data-close aria-label="Close report definitions">✕</button></div><div class="dialog-body"><p>This view covers <strong>completed, one-off scheduled sends</strong>. Campaign date filters use the send date, with engagement accumulated up to each summary's last recalculation. Ongoing triggered sends are outside this view.</p><dl><dt>Periods and comparisons</dt><dd>7, 30 or 90 complete days, ending on the report's through-date. Comparisons use the immediately preceding period of equal length. Newer campaigns have had less time to collect engagement. “pp” means percentage points.</dd><dt>Delivery rate</dt><dd>Delivered ÷ sent. Delivery indicates that a message was not recorded as bounced; it does not confirm inbox placement.</dd><dt>Click rate and open rate</dt><dd>Unique clicks ÷ delivered, and unique opens ÷ delivered. Period rates use summed counts, never averages of job rates. Unique counts are unique within each job, not deduplicated people across the whole period. Automated activity can affect tracking; Apple Mail privacy features can inflate opens.</dd><dt>Unsubscribe and complaint rates</dt><dd>Unsubscribes ÷ delivered and complaints ÷ delivered. Bounce rate uses bounces ÷ sent. A missing denominator displays as “N/A”.</dd><dt>Recent campaigns and exports</dt><dd>The table contains a bounded recent-job list. Search and sort apply only to that loaded list. Export includes all matching loaded rows across every table page. Summary cards and the chart use all matching jobs in the loaded payload before the table cap. The report appears only after all campaign batches for the reporting and comparison periods have loaded. Incomplete retrieval displays an error instead of partial totals.</dd><dt>Audience and journeys</dt><dd>These are All EMEA latest-snapshot views and do not change with the campaign period. They are hidden while a region or send-stage filter is active. Active status alone is not proof of campaign eligibility or consent. Segments can overlap, so their sizes should not be added together. Journey status is per version as recorded in the extract.</dd><dt>Region and send stage</dt><dd>Region comes from the exact EUxx token in EmailName. PNT identifies Parent sends. Unknown codes stay unclassified and remain included in All regions / All stages. RM identifies Remail sends. Current and recognised legacy generator structures are supported. Region identifies the campaign market, not verified recipient residence. A regional URL selects a view; it does not restrict access to other regions.</dd><dt>Loading and freshness</dt><dd>Campaign summaries load first. Audience snapshots and link details load only when requested, and successful results are reused for this page visit. The retrieved time records when the payload was prepared; it does not mean that the underlying data was recalculated then. Campaign freshness uses LastRecalculated where supplied. Unknown dates remain unverified. Link details can advance after the main report was loaded.</dd><dt>Sample data</dt><dd id="sample-definition">All figures, campaign names, dates and journey statuses in this concept are illustrative. No connection to Salesforce is active.</dd></dl></div></dialog>
+<dialog id="view-link-dialog" aria-labelledby="view-link-title"><div class="dialog-head"><h2 id="view-link-title">Copy this view link</h2><button type="button" data-close aria-label="Close view link">✕</button></div><div class="dialog-body"><label for="view-link-input" class="small">This link remembers region, send stage and period.</label><input id="view-link-input" type="text" readonly style="width:100%;margin-top:12px"><p class="footnote" style="margin-top:12px">Copy the selected link using your browser or keyboard.</p></div></dialog>
+<div id="announcement" role="status" aria-live="polite" hidden></div>
+<!-- 2. LIVE PAYLOAD INJECTION POINT. Leave null in sample mode. See safe JSON rules above. -->
+<script id="reporting-payload" type="application/json">null</script>
+<script>
+'use strict';
+(() => {
+  /* 3. SHARED HELPERS. All DE text is escaped; URLs are shown as text only. */
+  const $ = id => document.getElementById(id);
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  // Reuse formatters across rows and filter changes; constructing one per cell is costly.
+  const formats = {
+    number:new Intl.NumberFormat(CONFIG.locale),
+    compact:new Intl.NumberFormat(CONFIG.locale,{notation:'compact',maximumFractionDigits:1}),
+    day:new Intl.DateTimeFormat(CONFIG.locale,{day:'numeric',month:'short',timeZone:'UTC'}),
+    dayYear:new Intl.DateTimeFormat(CONFIG.locale,{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}),
+    timestamp:new Intl.DateTimeFormat(CONFIG.locale,{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',timeZone:CONFIG.reportingTimeZone}),
+    reportDay:new Intl.DateTimeFormat('en-GB',{timeZone:CONFIG.reportingTimeZone,year:'numeric',month:'2-digit',day:'2-digit'}),
+    percent:new Map()
+  };
+  const num = value => formats.number.format(value);
+  const compact = value => formats.compact.format(value);
+  const ratio = (n,d) => d > 0 ? n / d : null;
+  const pct = (value,digits=2) => {if(value===null)return 'N/A';if(!formats.percent.has(digits))formats.percent.set(digits,new Intl.NumberFormat(CONFIG.locale,{style:'percent',minimumFractionDigits:digits,maximumFractionDigits:digits}));return formats.percent.get(digits).format(value);};
+  const dayDate = value => new Date(value + 'T12:00:00Z');
+  const dayLabel = (value,year=false) => (year?formats.dayYear:formats.day).format(dayDate(value));
+  const dateTime = value => formats.timestamp.format(new Date(value));
+  const reportDate = value => {const parts=formats.reportDay.formatToParts(new Date(value));const get=k=>parts.find(p=>p.type===k).value;return get('year')+'-'+get('month')+'-'+get('day');};
+  const newestJob = (a,b) => Date.parse(b.PickupTime)-Date.parse(a.PickupTime)||b.JobID-a.JobID;
+  const addDays = (value,n) => {const d=dayDate(value);d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
+  const countFields = ['Sends','Delivered','Bounces','UniqueOpens','UniqueClicks','Unsubscribes','Complaints'];
+  const total = rows => rows.reduce((out,row) => {countFields.forEach(k => out[k]+=row[k]);return out;},Object.fromEntries(countFields.map(k=>[k,0])));
+  const bar = (label,value,denominator,colour='var(--teal)',suffix='') => `<div class="bar-row"><div class="bar-label"><span>${esc(label)}</span><strong>${num(value)}${suffix}</strong></div><div class="bar-track" aria-hidden="true"><div class="bar-fill" style="width:${Math.min(100,Math.max(0,(ratio(value,denominator)||0)*100))}%;background:${colour}"></div></div></div>`;
+  const Naming = {
+    parse(emailName){
+      const tokens=String(emailName||'').trim().toUpperCase().split('_');
+      const offset=/^V\d+$/.test(tokens[0])?1:0;
+      if(tokens[offset]!=='H')return {region:'UNKNOWN',stage:'UNKNOWN',regionToken:'',stageToken:''};
+      const regionToken=tokens[offset+1]||'';
+      let stageToken='';
+      if(tokens[offset+3]==='EMAIL')stageToken=tokens[offset+2]||'';
+      else if(CONFIG.legacyCategories.includes(tokens[offset+2])){
+        const dateIndex=tokens.findIndex((token,index)=>index>=offset+5&&index<=offset+8&&/^\d{8}$/.test(token));
+        if(dateIndex>=0)stageToken=tokens[dateIndex-1]||'';
+      }
+      const region=Object.hasOwn(CONFIG.regions,regionToken)?CONFIG.regions[regionToken].code:'UNKNOWN';
+      const stage=Object.hasOwn(CONFIG.stageTokens,stageToken)?CONFIG.stageTokens[stageToken]:'UNKNOWN';
+      return {region,stage,regionToken,stageToken};
+    },
+    regionLabel(code){return code==='ALL'?'All EMEA':Object.values(CONFIG.regions).find(r=>r.code===code)?.label||'Unclassified region';},
+    stageLabel(code){return code==='ALL'?'All stages':CONFIG.stageLabels[code]||'Unclassified';},
+    matches(job){return (State.region==='ALL'||job.classification.region===State.region)&&(State.stage==='ALL'||job.classification.stage===State.stage);}
+  };
+  const State = {data:null,report:null,period:CONFIG.defaultPeriod,region:CONFIG.defaultRegion,stage:CONFIG.defaultStage,chart:'click',query:'',sort:'newest',page:1};
+  const selectedPeriod = () => State.report;
+  const Report = {
+    build(){
+      const meta=State.data.meta,end=meta.throughDate,start=addDays(end,1-State.period);
+      const previousEnd=addDays(start,-1),previousStart=addDays(start,-State.period);
+      const complete=meta.jobsComplete&&start>=meta.coverageStart;
+      const comparisonComplete=complete&&previousStart>=meta.coverageStart;
+      const inRange=(a,b)=>State.data.jobs.filter(j=>j.reportDate>=a&&j.reportDate<=b&&Naming.matches(j));
+      const jobs=inRange(start,end).sort(newestJob);
+      const dayGroups=new Map();jobs.forEach(j=>{if(!dayGroups.has(j.reportDate))dayGroups.set(j.reportDate,[]);dayGroups.get(j.reportDate).push(j);});
+      return {start,end,previousStart,previousEnd,complete,totals:total(jobs),previous:comparisonComplete?total(inRange(previousStart,previousEnd)):null,
+        totalCampaigns:jobs.length,jobs,campaigns:jobs.slice(0,CONFIG.recentCampaignLimit),
+        unclassifiedRegion:jobs.filter(j=>j.classification.region==='UNKNOWN').length,
+        unclassifiedStage:jobs.filter(j=>j.classification.stage==='UNKNOWN').length,
+        daily:Array.from({length:State.period},(_,i)=>{const date=addDays(start,i),rows=dayGroups.get(date)||[];return {date,...total(rows),available:rows.length>0||complete};})};
+    }
+  };
+
+  /* 4. SAMPLE DATA. Stable fixtures anchored to a fixed date, not random per visit.
+     Totals/previous periods/daily chart are calculated from the COMPLETE sample
+     cohort. Only the campaign list is capped. Keep fixtures out of live mode. */
+  const SampleData = {
+    create() {
+      const jobs=[];
+      const markets=['GB','FR','DE','IT','ES','NO','SE','NL','BE','LU'];
+      const themes=['Late summer escapes','A little further this weekend','Your next journey starts here','More of Europe, for less','The open road is calling','Time for a change of scenery'];
+      const horizon=Math.max(...CONFIG.periods)*2;
+      for(let offset=horizon-1;offset>=0;offset--){
+        const date=addDays(CONFIG.sampleThroughDate,-offset);
+        for(let variant=0;variant<2;variant++){
+          const i=horizon-offset, market=markets[(i-1)%markets.length];
+          const stage=i%7===0&&variant===1?'OTHER':variant===1?'RM':'PNT';
+          const regionToken=i%29===0&&variant===1?'EUXX':'EU'+market;
+          const sends=12000+((i*7919+variant*4321)%52000);
+          const bounces=Math.round(sends*(.0038+((i+variant)%8)*.00045));
+          const delivered=sends-bounces;
+          const clicks=Math.round(delivered*(.025+Math.sin(i*.26)*.007+((i+variant)%5)*.002+ i*.000012));
+          const opens=Math.round(delivered*(.43+Math.sin(i*.14)*.055+variant*.035));
+          const title=themes[(Math.floor(i/5)+variant)%themes.length];
+          const job={JobID:1400000+i*2+variant,displayName:title,EmailName:`V2_H_${regionToken}_${stage}_EMAIL_BRD_ALL_DIG_ALL_${date.replaceAll('-','')}_${variant?'NONMEMBER':'MEMBER'}_BAU`,EmailSubject:title,PickupTime:date+'T09:00:00Z',Sends:sends,Delivered:delivered,Bounces:bounces,UniqueOpens:opens,UniqueClicks:clicks,Unsubscribes:Math.round(delivered*(.0006+((i+variant)%4)*.00012)),Complaints:Math.round(delivered*.000015)};
+          job.LastRecalculated=CONFIG.sampleGeneratedAt;
+          job.links=null;
+          jobs.push(job);
+        }
+      }
+      return {schemaVersion:2,meta:{generatedAt:CONFIG.sampleGeneratedAt,throughDate:CONFIG.sampleThroughDate,coverageStart:addDays(CONFIG.sampleThroughDate,1-horizon),timeZone:CONFIG.reportingTimeZone,jobsComplete:true,campaignScope:'completed-one-off'},jobs,
+        audience:null};
+    },
+    createAudience(){return {snapshotDate:CONFIG.sampleThroughDate,
+          database:{TotalSubscribers:853535,ActiveCount:766470,BouncedCount:2540,HeldCount:15870,UnsubscribedCount:68655},
+          engagement:null,
+          personas:[{Persona:'Loyalists',Contacts:238990},{Persona:'Window Shoppers',Contacts:315808},{Persona:'Selective Subscribers',Contacts:187778},{Persona:'Winback/Dormant',Contacts:110959}],
+          segments:[{SegmentKey:'Members',SegmentSize:610561,MailableSize:568200},{SegmentKey:'Non-members',SegmentSize:155909,MailableSize:141290},{SegmentKey:'Clicked in last 90 days',SegmentSize:142287,MailableSize:136500}],
+          journeys:[{JourneyID:'sample-welcome',JourneyName:'Member welcome',VersionNumber:3,JourneyStatus:'Running'},{JourneyID:'sample-thankyou',JourneyName:'Thank you for renting',VersionNumber:2,JourneyStatus:'Running'},{JourneyID:'sample-anniversary',JourneyName:'Membership anniversary',VersionNumber:1,JourneyStatus:'Stopped'}]};},
+    createLinks(job){return {JobID:job.JobID,retrievedAt:CONFIG.sampleGeneratedAt,linksComplete:true,
+      links:[['Hero booking CTA','/rentacar/reservation/',.61],['Explore destinations','/rentacar/misc/index.jsp',.26],['App promotion','/rentacar/productservice/index.jsp',.19]].map(([name,path,share])=>({LinkName:name,URL:'https://www.hertz.com'+path,UniqueClicks:Math.round(job.UniqueClicks*share),TotalClicks:Math.round(job.UniqueClicks*share*1.35)}))};}
+  };
+
+  /* 5. TRANSPORT. One primary request, optional explicit detail requests.
+     These are browser requests to YOUR server endpoint, not direct SFMC API calls.
+     Successful data and in-flight promises are cached only in page memory. */
+  const Transport = {
+    requests:new Map(),
+    queue:Promise.resolve(),
+    cooldownUntil:0,
+    failure(code,retryAt=0){
+      const messages={
+        INCOMPLETE_REPORT:'The complete campaign report could not be retrieved. Please retry. No partial totals are shown.',
+        UNAUTHORISED:'Your reporting session is unavailable. Sign in through the approved reporting entry point, then reopen this page.',
+        FORBIDDEN:'You do not have access to this reporting data. Contact your reporting administrator.',
+        RATE_LIMITED:'The reporting service is busy. Please wait before trying again.',
+        TEMPORARY_UNAVAILABLE:'The reporting service is temporarily unavailable. Please try again shortly.',
+        TIMEOUT:'The request took too long. Please wait before trying again.',
+        INVALID_RESPONSE:'The reporting service returned an unexpected response. Please contact your reporting administrator if this continues.',
+        CONFIGURATION:'This data view is not configured. Contact your reporting administrator.'
+      };
+      if(!Object.hasOwn(messages,code))code='TEMPORARY_UNAVAILABLE';
+      return Object.assign(new Error(messages[code]),{code,retryAt});
+    },
+    message(error){return error?.code?this.failure(error.code).message:'The reporting data could not be loaded. Please try again shortly.';},
+    retryAt(value,fallbackMs){
+      const raw=String(value??'').trim(),now=Date.now();
+      const target=/^\d+$/.test(raw)?now+Number(raw)*1000:raw?Date.parse(raw):NaN;
+      return Number.isFinite(target)&&target<=8.64e15?Math.max(now,target):now+fallbackMs;
+    },
+    retryButton(button,error,label){
+      clearTimeout(button.retryTimer);
+      if(error&&!error.code&&!error.retryAt)error.retryAt=Date.now()+CONFIG.retryCooldownMs;
+      if(['UNAUTHORISED','FORBIDDEN','CONFIGURATION'].includes(error?.code)){button.disabled=true;button.textContent='Unavailable';return;}
+      const update=()=>{
+        if(!button.isConnected)return;
+        const remaining=Math.max(error?.retryAt||0,this.cooldownUntil)-Date.now();
+        button.disabled=remaining>0;
+        button.textContent=remaining>0?'Please wait…':label;
+        // Timer updates the control only. It never sends a request.
+        if(remaining>0)button.retryTimer=setTimeout(update,Math.min(remaining+20,2147483647));
+      };
+      update();
+    },
+    once(key,loader){
+      if(this.requests.has(key))return this.requests.get(key);
+      const promise=Promise.resolve().then(loader).catch(error=>{this.requests.delete(key);throw error;});
+      this.requests.set(key,promise);return promise;
+    },
+    enqueue(loader){
+      // Shared by live transport and sample emulation, with one active load per page.
+      const request=this.queue.then(loader);
+      this.queue=request.catch(()=>{});return request;
+    },
+    json(endpoint,params={}){return this.enqueue(()=>this.fetchJSON(endpoint,params));},
+    async fetchJSON(endpoint,params){
+      if(Date.now()<this.cooldownUntil)throw this.failure('RATE_LIMITED',this.cooldownUntil);
+      if(!endpoint)throw this.failure('CONFIGURATION');
+      let url;try{url=new URL(endpoint,location.href);}catch{throw this.failure('CONFIGURATION');}
+      if(url.origin!==location.origin||url.protocol!=='https:'||url.username||url.password)throw this.failure('CONFIGURATION');
+      Object.entries(params).forEach(([key,value])=>url.searchParams.set(key,String(value)));
+      const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),CONFIG.requestTimeoutMs);
+      try{
+        const response=await fetch(url,{signal:controller.signal,credentials:'same-origin',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer',headers:{Accept:'application/json'}});
+        if(response.status===401)throw this.failure('UNAUTHORISED');
+        if(response.status===403)throw this.failure('FORBIDDEN');
+        if(response.status===429||response.status===503){
+          const retryAt=this.retryAt(response.headers.get('retry-after'),response.status===429?CONFIG.rateLimitCooldownMs:CONFIG.retryCooldownMs);
+          throw this.failure(response.status===429?'RATE_LIMITED':'TEMPORARY_UNAVAILABLE',retryAt);
+        }
+        if(!response.ok)throw this.failure('TEMPORARY_UNAVAILABLE');
+        if((response.headers.get('content-type')||'').split(';')[0].trim().toLowerCase()!=='application/json')throw this.failure('INVALID_RESPONSE');
+        if(Number(response.headers.get('content-length')||0)>CONFIG.maxResponseBytes)throw this.failure('INVALID_RESPONSE');
+        const reader=response.body?.getReader();let text='';
+        if(reader){const decoder=new TextDecoder();let bytes=0;while(true){const chunk=await reader.read();if(chunk.done)break;bytes+=chunk.value.byteLength;if(bytes>CONFIG.maxResponseBytes)throw this.failure('INVALID_RESPONSE');text+=decoder.decode(chunk.value,{stream:true});}text+=decoder.decode();}
+        else{text=await response.text();if(new TextEncoder().encode(text).byteLength>CONFIG.maxResponseBytes)throw this.failure('INVALID_RESPONSE');}
+        let result;try{result=JSON.parse(text);}catch{throw this.failure('INVALID_RESPONSE');}
+        // Some endpoint hosts return HTTP 200 even for application failures.
+        // Only allowlisted codes are used; server messages/stack traces are never displayed.
+        if(result?.ok===false)throw this.failure(result.error?.code,this.retryAt(result.error?.retryAfterSeconds,CONFIG.retryCooldownMs));
+        return result;
+      }catch(error){
+        const failure=typeof error.code==='string'?error:this.failure(error.name==='AbortError'?'TIMEOUT':'TEMPORARY_UNAVAILABLE');
+        if(!['UNAUTHORISED','FORBIDDEN','CONFIGURATION'].includes(failure.code)){
+          failure.retryAt=Math.max(failure.retryAt||0,Date.now()+CONFIG.retryCooldownMs);
+          this.cooldownUntil=Math.max(this.cooldownUntil,failure.retryAt);
+        }
+        throw failure;
+      }finally{clearTimeout(timer);controller.abort();} // Stop body downloads on every rejection.
+    }
+  };
+
+  /* SAMPLE-ONLY TIMING. No network calls; configuration is next to dataMode.
+     Keep waits inside the cached loader so cache hits remain immediate. */
+  const DemoLoading = {
+    enabled(){return CONFIG.dataMode==='sample'&&CONFIG.demoLoading.enabled;},
+    read(kind,fixture){
+      if(CONFIG.dataMode!=='sample')return Promise.reject(Transport.failure('CONFIGURATION'));
+      return Transport.enqueue(async()=>{
+        if(this.enabled()){
+          const delay=CONFIG.demoLoading.delaysMs[kind];
+          if(!Number.isFinite(delay)||delay<0)throw Transport.failure('CONFIGURATION');
+          if(Date.now()<Transport.cooldownUntil)throw Transport.failure('RATE_LIMITED',Transport.cooldownUntil);
+          await new Promise(resolve=>setTimeout(resolve,Math.min(delay,CONFIG.requestTimeoutMs)));
+          if(delay>=CONFIG.requestTimeoutMs){
+            Transport.cooldownUntil=Date.now()+CONFIG.retryCooldownMs;
+            throw Transport.failure('TIMEOUT',Transport.cooldownUntil);
+          }
+        }
+        return fixture();
+      });
+    }
+  };
+
+  /* 6. DATA PROVIDER. The sole SFMC adapter boundary; sample mode never fetches. */
+  const DataProvider = {
+    async load(){
+      let data;
+      if(CONFIG.dataMode==='sample') data=await DemoLoading.read('report',()=>SampleData.create());
+      else if(CONFIG.dataMode==='embedded') data=JSON.parse($('reporting-payload').textContent);
+      else if(CONFIG.dataMode==='remote') data=await this.loadCompleteReport();
+      else throw new Error('Unknown data mode.');
+      this.validate(data);
+      if(!data.meta.jobsComplete||data.meta.coverageStart>addDays(data.meta.throughDate,1-Math.max(...CONFIG.periods)*2))throw Transport.failure('INCOMPLETE_REPORT');
+      data.jobs=data.jobs.map(j=>({...j,classification:Naming.parse(j.EmailName),reportDate:reportDate(j.PickupTime)}));
+      return data;
+    },
+    async loadCompleteReport(){
+      let cursor=null,meta=null,signature=null,bytes=0;
+      const jobs=[],ids=new Set(),cursors=new Set();
+      const horizonDays=Math.max(...CONFIG.periods)*2;
+      for(let batch=0;batch<CONFIG.maxReportBatches;batch++){
+        $('report-loading').textContent='Loading campaign report…';
+        const response=await Transport.json(CONFIG.endpoints.report,{horizonDays,...(cursor?{cursor}:{})});
+        this.validate(response);
+        if(response.audience!==null||!Object.hasOwn(response,'nextCursor'))throw Transport.failure('INVALID_RESPONSE');
+        const next=response.nextCursor;
+        if(next!==null&&(typeof next!=='string'||!next.length||next.length>8192))throw Transport.failure('INVALID_RESPONSE');
+        if(response.meta.jobsComplete!==(next===null))throw Transport.failure('INCOMPLETE_REPORT');
+        const {jobsComplete,...fixed}=response.meta;
+        const current=JSON.stringify(Object.keys(fixed).sort().map(k=>[k,fixed[k]]));
+        if(signature!==null&&current!==signature)throw Transport.failure('INVALID_RESPONSE');
+        signature=current;meta=response.meta;
+        bytes+=new TextEncoder().encode(JSON.stringify(response)).byteLength;
+        if(bytes>CONFIG.maxReportBytes||jobs.length+response.jobs.length>CONFIG.maxReportRows)throw Transport.failure('INCOMPLETE_REPORT');
+        for(const job of response.jobs){if(ids.has(job.JobID))throw Transport.failure('INVALID_RESPONSE');ids.add(job.JobID);jobs.push(job);}
+        if(next===null)return {schemaVersion:2,meta,jobs,audience:null};
+        if(cursors.has(next))throw Transport.failure('INVALID_RESPONSE');
+        cursors.add(next);cursor=next;
+      }
+      throw Transport.failure('INCOMPLETE_REPORT');
+    },
+    loadAudience(){return Transport.once('audience',async()=>{
+      const result=CONFIG.dataMode==='sample'?await DemoLoading.read('audience',()=>({audience:SampleData.createAudience()})):await Transport.json(CONFIG.endpoints.audience,{throughDate:State.data.meta.throughDate});
+      if(!result||!Object.hasOwn(result,'audience'))throw new Error('Missing audience response.');
+      this.validate({...State.data,audience:result.audience});return result.audience;
+    });},
+    loadLinks(job){return Transport.once('links:'+job.JobID,async()=>{
+      const result=CONFIG.dataMode==='sample'?await DemoLoading.read('links',()=>SampleData.createLinks(job)):await Transport.json(CONFIG.endpoints.links,{jobId:job.JobID});
+      if(!result||result.JobID!==job.JobID||typeof result.linksComplete!=='boolean'||!Array.isArray(result.links)||typeof result.retrievedAt!=='string'||!/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(result.retrievedAt)||!Number.isFinite(Date.parse(result.retrievedAt)))throw new Error('Invalid link response.');
+      this.validate({...State.data,jobs:[{...job,links:result.links,linksComplete:result.linksComplete}],audience:null});return result;
+    });},
+    validate(data){
+      const assert=(ok,message)=>{if(!ok)throw new Error(message);};
+      const isDate=s=>typeof s==='string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(dayDate(s).getTime()) && dayDate(s).toISOString().slice(0,10)===s;
+      const integer=v=>Number.isSafeInteger(v)&&v>=0;
+      const text=(v,length)=>typeof v==='string'&&v.length<=length;
+      const isTimestamp=v=>typeof v==='string' && /T.*(?:Z|[+-]\d{2}:\d{2})$/.test(v) && Number.isFinite(Date.parse(v));
+      const counts=row=>{assert(row&&countFields.every(k=>integer(row[k])),'Invalid metric counts.');assert(row.Delivered+row.Bounces===row.Sends,'Delivery counts do not reconcile.');assert(row.UniqueClicks<=row.Delivered&&row.UniqueOpens<=row.Delivered,'Invalid unique engagement count.');};
+      assert(data&&data.schemaVersion===2,'Missing or unsupported reporting payload.');
+      assert(data.meta&&isDate(data.meta.throughDate)&&isDate(data.meta.coverageStart)&&isTimestamp(data.meta.generatedAt),'Invalid report metadata.');
+      assert(data.meta.timeZone===CONFIG.reportingTimeZone,'Reporting timezone does not match configuration.');
+      assert(typeof data.meta.jobsComplete==='boolean'&&data.meta.coverageStart<=data.meta.throughDate,'Missing coverage certification.');
+      assert(data.meta.campaignScope==='completed-one-off','Unsupported campaign scope.');
+      assert(Array.isArray(data.jobs)&&data.jobs.length<=CONFIG.maxReportRows,'Job payload exceeds the configured budget.');
+      const ids=new Set();data.jobs.forEach(j=>{
+        counts(j);assert(integer(j.JobID)&&!ids.has(j.JobID),'Duplicate or invalid JobID.');ids.add(j.JobID);
+        assert(text(j.EmailName,200)&&(j.EmailSubject==null||text(j.EmailSubject,300))&&(j.displayName==null||text(j.displayName,200))&&isTimestamp(j.PickupTime),'Invalid campaign metadata.');
+        assert(j.LastRecalculated==null||isTimestamp(j.LastRecalculated),'Invalid source recalculation date.');
+        const date=reportDate(j.PickupTime);assert(date>=data.meta.coverageStart&&date<=data.meta.throughDate,'Job outside declared coverage.');
+        assert(j.links===null||Array.isArray(j.links),'Invalid link data.');
+        assert(j.linksComplete==null||typeof j.linksComplete==='boolean','Invalid link completeness flag.');
+        if(j.links){assert(j.links.length<=CONFIG.maxLinksPerJob,'Link payload exceeds budget.');j.links.forEach(l=>assert(text(l.URL,400)&&(l.LinkName==null||text(l.LinkName,200))&&integer(l.UniqueClicks)&&integer(l.TotalClicks)&&l.TotalClicks>=l.UniqueClicks,'Invalid link data.'));}
+      });
+      if(data.audience===null)return;
+      const a=data.audience;assert(a&&isDate(a.snapshotDate)&&a.snapshotDate<=data.meta.throughDate,'Invalid audience snapshot.');
+      assert(a.database&&['TotalSubscribers','ActiveCount','BouncedCount','HeldCount','UnsubscribedCount'].every(k=>integer(a.database[k])),'Invalid database snapshot.');
+      assert(['ActiveCount','BouncedCount','HeldCount','UnsubscribedCount'].reduce((n,k)=>n+a.database[k],0)===a.database.TotalSubscribers,'Database statuses do not reconcile.');
+      assert(Array.isArray(a.personas)&&Array.isArray(a.segments)&&Array.isArray(a.journeys),'Invalid audience lists.');
+      assert([a.personas,a.segments,a.journeys].every(rows=>rows.length<=CONFIG.maxAudienceItems),'Audience list exceeds budget.');
+      a.personas.forEach(p=>assert(text(p.Persona,50)&&integer(p.Contacts),'Invalid persona data.'));
+      a.segments.forEach(s=>assert(text(s.SegmentKey,100)&&integer(s.SegmentSize)&&integer(s.MailableSize)&&s.MailableSize<=s.SegmentSize,'Invalid segment data.'));
+      if(a.engagement!==null){const e=a.engagement;assert(e&&['profiled','clicked90','sent90NoClick','notSent90'].every(k=>integer(e[k]))&&e.clicked90+e.sent90NoClick+e.notSent90===e.profiled,'Engagement bands do not reconcile.');}
+      const versions=new Set();a.journeys.forEach(j=>{const key=j.JourneyID+'|'+j.VersionNumber;assert(text(j.JourneyID,50)&&text(j.JourneyName,200)&&(j.JourneyStatus==null||text(j.JourneyStatus,50))&&integer(j.VersionNumber)&&!versions.has(key),'Duplicate or invalid journey version.');versions.add(key);});
+    }
+  };
+
+  /* Source freshness is separate from payload retrieval time. Missing dates stay unknown. */
+  const Freshness = {
+    render(){
+      const rows=State.data.jobs,times=rows.filter(j=>j.LastRecalculated).map(j=>Date.parse(j.LastRecalculated));
+      const missing=rows.length-times.length;
+      const oldest=times.length?Math.min(...times):null,newest=times.length?Math.max(...times):null;
+      const label=oldest===null?'Source recalculation time unavailable.':oldest===newest?'Loaded summaries last calculated '+dateTime(oldest)+'.':'Loaded summaries last calculated between '+dateTime(oldest)+' and '+dateTime(newest)+'.';
+      $('source-freshness').textContent=label+(missing?' '+num(missing)+' loaded jobs have no recalculation timestamp.':'');
+      $('stale-notice').hidden=true;
+      if(CONFIG.dataMode==='sample'||!rows.length)return;
+      const warnings=[];
+      if(missing)warnings.push('Data freshness cannot be verified for every loaded campaign.');
+      if(oldest!==null&&(Date.now()-oldest)/3600000>CONFIG.staleAfterHours)warnings.push('Some campaign summaries were calculated more than '+CONFIG.staleAfterHours+' hours ago. Check the expected refresh schedule.');
+      if((Date.now()-Date.parse(State.data.meta.generatedAt))/3600000>CONFIG.staleAfterHours)warnings.push('This report payload was also retrieved more than '+CONFIG.staleAfterHours+' hours ago.');
+      $('stale-notice').textContent=warnings.join(' ');$('stale-notice').hidden=!warnings.length;
+    }
+  };
+
+  /* 6. PERFORMANCE SUMMARY. Rates are ratios of aggregate counts. */
+  const Metrics = {
+    delta(current,previous,isRate=false,direction=0){
+      if(current===null||previous===null||(!isRate&&previous===0))return '<span class="delta muted">Comparison unavailable</span>';
+      const diff=isRate?(current-previous)*100:((current-previous)/previous)*100;
+      const rounded=Number(diff.toFixed(isRate?2:1));
+      const cls=direction===0||rounded===0?'muted':(Math.sign(rounded)===direction?'positive':'negative');
+      return `<span class="delta ${cls}">${rounded>0?'↑ ':rounded<0?'↓ ':''}${Math.abs(rounded).toFixed(isRate?2:1)}${isRate?' pp':'%'} <span class="muted">vs previous period</span></span>`;
+    },
+    render(){
+      const p=selectedPeriod(),t=p.totals,b=p.previous;
+      const items=[
+        {name:'Emails sent',value:num(t.Sends),delta:this.delta(t.Sends,b?b.Sends:null),detail:num(p.totalCampaigns)+(p.complete?' matching send jobs':' matching loaded jobs')},
+        {name:'Delivery rate',value:pct(ratio(t.Delivered,t.Sends)),delta:this.delta(ratio(t.Delivered,t.Sends),b?ratio(b.Delivered,b.Sends):null,true,1),detail:num(t.Delivered)+' delivered'},
+        {name:'Click rate',value:pct(ratio(t.UniqueClicks,t.Delivered)),delta:this.delta(ratio(t.UniqueClicks,t.Delivered),b?ratio(b.UniqueClicks,b.Delivered):null,true,1),detail:num(t.UniqueClicks)+' unique clicks across jobs'},
+        {name:'Unsubscribe rate',value:pct(ratio(t.Unsubscribes,t.Delivered)),delta:this.delta(ratio(t.Unsubscribes,t.Delivered),b?ratio(b.Unsubscribes,b.Delivered):null,true,-1),detail:num(t.Unsubscribes)+' unsubscribes'}
+      ];
+      $('kpis').innerHTML=items.map((k,i)=>`<article class="kpi ${i===2?'featured':''}"><h2 class="kpi-title">${k.name}<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M3 14 8 9l4 3 5-8M12 4h5v5"/></svg></h2><p class="kpi-value">${k.value}</p>${k.delta}<p class="kpi-detail">${k.detail}</p></article>`).join('');
+      $('period-label').textContent=dayLabel(p.start)+' - '+dayLabel(p.end,true);
+      $('comparison-label').textContent=(p.previous?`Compared with ${dayLabel(p.previousStart)} - ${dayLabel(p.previousEnd,true)}, using the same region and stage. `:'Comparison unavailable: complete coverage is required for both periods. ')+'Engagement reflects the latest source calculations; newer sends have had less time to respond.';
+      $('health').innerHTML=[['Bounces',num(t.Bounces),pct(ratio(t.Bounces,t.Sends))+' of sends'],['Open rate',pct(ratio(t.UniqueOpens,t.Delivered)),num(t.UniqueOpens)+' unique opens across jobs'],['Complaints',num(t.Complaints),pct(ratio(t.Complaints,t.Delivered),3)+' of delivered']].map(([label,value,note])=>`<div class="health-row"><span>${label}</span><strong>${value}<small>${note}</small></strong></div>`).join('')+'<p class="health-note">Opens can be inflated by privacy features. Use clicks alongside opens when assessing engagement.</p>';
+    }
+  };
+
+  /* 7. CHART. Dependency-free SVG with a complete accessible data-table alternative.
+     Null-rate days break the line, rather than pretending no sends means 0%. */
+  const Chart = {
+    render(){
+      const p=selectedPeriod(),mode=State.chart;
+      const values=p.daily.map(r=>!r.available?null:mode==='sends'?r.Sends:ratio(mode==='click'?r.UniqueClicks:r.UniqueOpens,r.Delivered));
+      const label=mode==='sends'?'Emails sent':mode==='click'?'Click rate':'Open rate';
+      const format=v=>v===null?'N/A':mode==='sends'?compact(v):pct(v);
+      const W=Math.max(300,$('trend-chart').clientWidth-40),H=218,left=55,right=14,top=20,bottom=32,pw=W-left-right,ph=H-top-bottom;
+      const maximum=Math.max(...values.filter(v=>v!==null),mode==='sends'?1:.01)*1.18;
+      const x=i=>left+i*pw/Math.max(1,values.length-1),y=v=>top+ph-(v/maximum)*ph;
+      let path='',segments=[],current=[];
+      values.forEach((v,i)=>{if(v===null){if(current.length)segments.push(current);current=[];}else current.push([x(i),y(v)]);});if(current.length)segments.push(current);
+      let marks='';
+      if(mode==='sends'){
+        const bw=Math.max(2,pw/values.length*.55);
+        marks=values.map((v,i)=>v===null?'':`<rect x="${x(i)-bw/2}" y="${y(v)}" width="${bw}" height="${top+ph-y(v)}" rx="1.5" fill="#b18c00"/>`).join('');
+      }else{
+        segments.forEach(points=>{path=points.map(([a,b],i)=>`${i?'L':'M'}${a.toFixed(2)},${b.toFixed(2)}`).join(' ');marks+=`<path d="${path} L${points.at(-1)[0]},${top+ph} L${points[0][0]},${top+ph} Z" fill="url(#trend-fill)"/><path d="${path}" fill="none" stroke="#202520" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>`;if(points.length===1)marks+=`<circle cx="${points[0][0]}" cy="${points[0][1]}" r="3" fill="#202520"/>`;});
+      }
+      const grid=Array.from({length:4},(_,i)=>{const value=maximum*i/3,yy=y(value);return `<line x1="${left}" x2="${W-right}" y1="${yy}" y2="${yy}" stroke="#e9e9e2" stroke-dasharray="3 4"/><text x="${left-10}" y="${yy+4}" text-anchor="end" fill="#63635e" font-size="10">${format(value)}</text>`;}).join('');
+      const labels=[0,Math.floor((values.length-1)/3),Math.floor((values.length-1)*2/3),values.length-1].map((i,j)=>`<text x="${x(i)}" y="${H-7}" text-anchor="${j===0?'start':j===3?'end':'middle'}" fill="#63635e" font-size="10">${dayLabel(p.daily[i].date)}</text>`).join('');
+      $('trend-chart').innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="chart-title chart-desc"><title id="chart-title">${label} by campaign send date</title><desc id="chart-desc">${dayLabel(p.start)} to ${dayLabel(p.end,true)}. Daily values and data gaps are available in View chart data below.</desc><defs><linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffcc00" stop-opacity=".24"/><stop offset="100%" stop-color="#ffcc00" stop-opacity=".025"/></linearGradient></defs>${grid}${marks}${labels}</svg>`;
+      $('chart-subtitle').textContent=label+' by send date'+(p.complete?'':' · loaded jobs only');
+      $('chart-gap-note').textContent=p.complete?(mode==='sends'?'':'Days without delivered sends have no rate.'): 'Partial data: missing days are unknown, not zero.';
+      $('chart-legend').textContent=mode==='sends'?'Emails sent':mode==='click'?'Unique clicks / delivered':'Unique opens / delivered';
+      $('trend-chart').classList.toggle('rate-chart',mode!=='sends');
+      const summary=mode==='sends'?p.totals.Sends:ratio(mode==='click'?p.totals.UniqueClicks:p.totals.UniqueOpens,p.totals.Delivered);
+      $('chart-summary').textContent=`${p.complete?'Period':'Loaded jobs'} ${mode==='sends'?'total':'rate'}: ${mode==='sends'?num(summary):pct(summary)}`;
+      $('chart-data').innerHTML='<table><caption class="sr-only">Daily send cohort data</caption><thead><tr><th scope="col">Send date</th><th scope="col">Sent</th><th scope="col">Delivered</th><th scope="col">Click rate</th><th scope="col">Open rate</th></tr></thead><tbody>'+p.daily.map(r=>`<tr><td>${dayLabel(r.date,true)}</td><td>${r.available?num(r.Sends):'N/A'}</td><td>${r.available?num(r.Delivered):'N/A'}</td><td>${pct(ratio(r.UniqueClicks,r.Delivered))}</td><td>${pct(ratio(r.UniqueOpens,r.Delivered))}</td></tr>`).join('')+'</tbody></table>';
+      document.querySelectorAll('[data-chart]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.chart===mode)));
+    }
+  };
+
+  /* 8. CAMPAIGN TABLE, DETAIL AND CSV. Search/sort never changes report-wide KPIs. */
+  const Campaigns = {
+    filtered(){
+      const q=State.query.trim().toLocaleLowerCase(CONFIG.locale);
+      const rows=selectedPeriod().campaigns.filter(j=>[j.displayName,j.EmailName,j.EmailSubject,j.JobID].some(v=>String(v??'').toLocaleLowerCase(CONFIG.locale).includes(q)));
+      return rows.sort((a,b)=>{
+        const tie=newestJob(a,b);
+        if(State.sort==='click')return (ratio(b.UniqueClicks,b.Delivered)??-1)-(ratio(a.UniqueClicks,a.Delivered)??-1)||tie;
+        if(State.sort==='sends')return b.Sends-a.Sends||tie;
+        return tie;
+      });
+    },
+    render(){
+      const p=selectedPeriod(),rows=this.filtered(),pages=Math.max(1,Math.ceil(rows.length/CONFIG.pageSize));
+      State.page=Math.min(State.page,pages);const start=(State.page-1)*CONFIG.pageSize;
+      $('campaign-rows').innerHTML=rows.slice(start,start+CONFIG.pageSize).map(j=>`<tr><td><button class="campaign-name" type="button" data-job="${j.JobID}" aria-label="View ${esc(j.displayName||j.EmailName)}">${esc(j.displayName||j.EmailName)}</button><div class="campaign-meta">${esc(dateTime(j.PickupTime))} · Job ${j.JobID}</div><div class="job-labels"><span class="job-label">${esc(Naming.regionLabel(j.classification.region))}</span><span class="job-label ${j.classification.stage==='PARENT'?'stage-parent':j.classification.stage==='REMAIL'?'stage-remail':''}">${esc(Naming.stageLabel(j.classification.stage))}</span></div></td><td>${num(j.Sends)}</td><td>${pct(ratio(j.Delivered,j.Sends))}</td><td>${pct(ratio(j.UniqueOpens,j.Delivered))}</td><td><span class="rate-pill">${pct(ratio(j.UniqueClicks,j.Delivered))}</span></td><td>${pct(ratio(j.Unsubscribes,j.Delivered))}</td></tr>`).join('');
+      $('campaign-scope').textContent=`${p.campaigns.length<p.totalCampaigns?'Latest '+num(p.campaigns.length)+' of '+num(p.totalCampaigns):num(p.totalCampaigns)} ${p.complete?'matching send jobs':'matching loaded jobs'}. Select a campaign for link performance.`;
+      $('campaign-empty').hidden=rows.length>0;
+      $('campaign-empty').textContent=p.campaigns.length?'No matching campaigns. Try another name or job ID.':(p.complete?'No campaigns match these filters in this period.':'No matching campaigns in the loaded data. Other campaigns may exist outside this partial set.');
+      $('table-count').textContent=rows.length?`${num(start+1)}-${num(Math.min(start+CONFIG.pageSize,rows.length))} of ${num(rows.length)} ${State.query?'matching':'loaded'} campaigns`:'0 matching campaigns';
+      $('page-label').textContent=`${State.page} / ${pages}`;
+      $('prev').disabled=State.page===1;$('next').disabled=State.page===pages;
+      $('export').disabled=rows.length===0;
+    },
+    detail(id){
+      const j=selectedPeriod().campaigns.find(r=>r.JobID===id);if(!j)return;
+      $('details-title').textContent=j.displayName||j.EmailName;
+      const cells=[['Sent',num(j.Sends)],['Delivery rate',pct(ratio(j.Delivered,j.Sends))],['Unique clicks',num(j.UniqueClicks)],['Open rate',pct(ratio(j.UniqueOpens,j.Delivered))],['Unsubscribes',num(j.Unsubscribes)],['Complaints',num(j.Complaints)]];
+      $('details-body').innerHTML=`<p class="small muted">${esc(Naming.regionLabel(j.classification.region))} · ${esc(Naming.stageLabel(j.classification.stage))}</p><p class="small muted">${esc(dateTime(j.PickupTime))} (${esc(CONFIG.reportingTimeZone)}) · Job ${j.JobID}</p><p><strong>Subject:</strong> ${esc(j.EmailSubject||'Not supplied')}</p><p class="detail-name">${esc(j.EmailName)}</p><div class="detail-metrics">${cells.map(([label,value])=>`<div><span>${label}</span><strong>${value}</strong></div>`).join('')}</div><div id="link-detail-panel"></div><p class="footnote">A contact can click more than one link. Unique link clicks must not be added together to calculate unique campaign clickers. Campaign summary last calculated ${j.LastRecalculated?esc(dateTime(j.LastRecalculated)):'at an unavailable time'}. Report retrieved ${esc(dateTime(State.data.meta.generatedAt))}.</p>`;
+      if(Array.isArray(j.links)&&!this.linkResults.has(id))this.linkResults.set(id,{JobID:id,links:j.links,linksComplete:j.linksComplete===true,retrievedAt:State.data.meta.generatedAt});
+      this.activeJob=id;
+      this.renderLinks(j);
+      $('details-dialog').showModal();
+    },
+    activeJob:null,
+    linkResults:new Map(),
+    linkErrors:new Map(),
+    linkLoading:new Set(),
+    renderLinks(job){
+      const result=this.linkResults.get(job.JobID);
+      if(result){
+        const rows=result.links.slice().sort((a,b)=>b.UniqueClicks-a.UniqueClicks);
+        $('link-detail-panel').innerHTML=`<h3>${result.linksComplete?'Link performance':'Loaded links'}</h3><p class="footnote" style="margin-top:6px">Link data retrieved ${esc(dateTime(result.retrievedAt))}. These values may have advanced since the main report.</p>`+(rows.length?`<div class="table-scroll" tabindex="0" role="region" aria-label="Campaign links"><table><caption class="sr-only">Tracked links for job ${job.JobID}</caption><thead><tr><th scope="col">Link</th><th scope="col">Unique clicks</th><th scope="col">Total clicks</th></tr></thead><tbody>${rows.map(l=>`<tr><td><strong>${esc(l.LinkName||'Unnamed link')}</strong><span class="link-url">${esc(l.URL)}</span></td><td>${num(l.UniqueClicks)}</td><td>${num(l.TotalClicks)}</td></tr>`).join('')}</tbody></table></div>`:'<p class="footnote">No tracked links were returned.</p>');
+      }else{
+        const loading=this.linkLoading.has(job.JobID),error=this.linkErrors.get(job.JobID);
+        $('link-detail-panel').innerHTML=`<h3>Link performance</h3><div class="link-load-panel"><p role="status">${loading?'Loading link performance…':error?esc(Transport.message(error))+' The campaign summary is still available.':'Load tracked-link results for this campaign.'}</p><button type="button" id="load-links" ${loading?'disabled':''}>${loading?'Loading…':error?'Retry links':'Load link performance'}</button></div>`;
+        $('load-links').addEventListener('click',()=>this.loadLinks(job));
+        if(error)Transport.retryButton($('load-links'),error,'Retry links');
+      }
+    },
+    async loadLinks(job){
+      if(this.linkLoading.has(job.JobID))return;
+      this.linkLoading.add(job.JobID);this.linkErrors.delete(job.JobID);this.renderLinks(job);
+      try{const result=await DataProvider.loadLinks(job);this.linkResults.set(job.JobID,result);}
+      catch(error){this.linkErrors.set(job.JobID,error);console.error('Link detail load failed:',error.message);}
+      finally{this.linkLoading.delete(job.JobID);if(this.activeJob===job.JobID&&$('details-dialog').open)this.renderLinks(job);}
+    },
+    export(){
+      /* CSV formula-injection protection applies to all exported text cells. */
+      const cell=v=>{let s=String(v??'');if(/^[\s]*[=+@-]/.test(s)||/^[\t\r\n]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';};
+      const p=selectedPeriod();
+      const headers=['DataMode','PayloadRetrievedAt','ReportingTimezone','PeriodStart','PeriodEnd','Scope','RegionFilter','StageFilter','CampaignRegion','SendStage','Coverage','JobID','EmailName','EmailSubject','PickupTime','LastRecalculated','Sends','Delivered','Bounces','UniqueOpens','UniqueClicks','Unsubscribes','Complaints','DeliveryRate','OpenRate','ClickRate','UnsubRate'];
+      const rate=(n,d)=>d?n/d:'';
+      const rows=this.filtered().map(j=>[CONFIG.dataMode,State.data.meta.generatedAt,CONFIG.reportingTimeZone,p.start,p.end,'Loaded recent one-off send jobs; lifetime metrics to source recalculation',State.region,State.stage,j.classification.region,j.classification.stage,p.complete?'Complete period':'Partial loaded set',j.JobID,j.EmailName,j.EmailSubject,j.PickupTime,j.LastRecalculated||'',...countFields.map(k=>j[k]),rate(j.Delivered,j.Sends),rate(j.UniqueOpens,j.Delivered),rate(j.UniqueClicks,j.Delivered),rate(j.Unsubscribes,j.Delivered)]);
+      const csv='\uFEFF'+[headers,...rows].map(r=>r.map(cell).join(',')).join('\r\n');
+      const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
+      const a=document.createElement('a');a.href=url;a.download=`${CONFIG.exportFilename}-${State.region}-${State.stage}-${CONFIG.dataMode}-${p.start}-to-${p.end}.csv`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+      App.announce(`${num(rows.length)} matching loaded campaigns exported.`);
+    }
+  };
+
+  /* 9. AUDIENCE. Snapshot panels intentionally render once, outside period changes. */
+  const Audience = {
+    status:'idle',
+    error:null,
+    init(){
+      this.status=State.data.audience?'ready':'idle';
+      $('load-audience').addEventListener('click',()=>this.load());
+      $('audience-nav').addEventListener('click',event=>{if(!$('audience-loader').hidden){event.preventDefault();$('audience-loader').scrollIntoView({behavior:'auto'});$('load-audience').focus();}});
+    },
+    renderLoader(){
+      const loading=this.status==='loading',failed=this.status==='error',empty=this.status==='empty';
+      $('audience-load-note').textContent=loading?'Loading the All EMEA audience snapshot…':failed?Transport.message(this.error)+' Campaign reporting is still available.':empty?'No aggregate audience snapshot is available.':'Load the latest All EMEA audience snapshot when you need it.';
+      $('load-audience').disabled=loading||empty;
+      $('load-audience').textContent=loading?'Loading…':failed?'Retry audience snapshot':empty?'Unavailable':'Load audience snapshot';
+      if(failed)Transport.retryButton($('load-audience'),this.error,'Retry audience snapshot');
+    },
+    async load(){
+      if(this.status==='loading'||this.status==='ready'||this.status==='empty')return;
+      this.status='loading';this.error=null;Filters.sync();
+      try{State.data.audience=await DataProvider.loadAudience();this.status=State.data.audience?'ready':'empty';if(State.data.audience)this.render();}
+      catch(error){this.status='error';this.error=error;console.error('Audience snapshot load failed:',error.message);}
+      finally{Filters.sync();}
+    },
+
+    render(){
+      const a=State.data.audience;if(!a)return;const d=a.database;
+      $('snapshot-date').textContent='Snapshot · '+dayLabel(a.snapshotDate,true);
+      const statuses=[['Active',d.ActiveCount,'var(--ink)'],['Unsubscribed',d.UnsubscribedCount,'#8c8c80'],['Held',d.HeldCount,'#b18c00'],['Bounced',d.BouncedCount,'var(--teal)']];
+      $('database').innerHTML=`<p class="big-number">${num(d.TotalSubscribers)}</p><p class="small muted">total subscribers</p><div class="stack" aria-hidden="true">${statuses.map(([,n,c])=>`<span style="width:${(ratio(n,d.TotalSubscribers)||0)*100}%;background:${c}"></span>`).join('')}</div><ul class="status-list">${statuses.map(([label,n,c])=>`<li><span class="status-label"><i class="dot" style="background:${c}" aria-hidden="true"></i>${label}</span><strong>${num(n)}</strong></li>`).join('')}</ul><p class="footnote" style="margin-top:18px">Active status does not by itself confirm consent or campaign eligibility.</p>`;
+      const personaTotal=a.personas.reduce((n,p)=>n+p.Contacts,0);
+      $('personas').innerHTML=a.personas.length?a.personas.map((p,i)=>bar(p.Persona,p.Contacts,personaTotal,i===0?'var(--ink)':'#858579')).join('')+`<p class="footnote">${num(personaTotal)} contacts in the persona snapshot.${CONFIG.dataMode==='sample'?' Illustrative counts.':''}</p>`:'<p class="footnote">No persona snapshot available.</p>';
+      $('segments').innerHTML=a.segments.length?a.segments.map(s=>bar(s.SegmentKey,s.MailableSize,s.SegmentSize,'var(--teal)',` <span class="muted">/ ${num(s.SegmentSize)}</span>`)).join('')+'<p class="footnote">Mailable / segment size. Segments may overlap; do not add these totals together.</p>':'<p class="footnote">No segment snapshot available.</p>';
+      $('journeys').innerHTML=a.journeys.length?a.journeys.map(j=>`<div class="journey"><div><p>${esc(j.JourneyName)}</p><small>Version ${j.VersionNumber}</small></div><span class="status-pill ${j.JourneyStatus==='Running'?'':'neutral'}">${esc(j.JourneyStatus||'Unknown')}</span></div>`).join('')+'<p class="footnote" style="margin-top:12px">Inventory only. Journey sends are not included in the campaign performance above.</p>':'<p class="footnote">No journey inventory available.</p>';
+    }
+  };
+
+  /* 10. FILTERS. Only allowlisted URL values are accepted. URLs select views,
+     not access permissions. Unknown values reset safely to configured defaults. */
+  const Filters = {
+    regionOptions(){return ['ALL',...Object.values(CONFIG.regions).map(r=>r.code),'UNKNOWN'];},
+    stageOptions(){return ['ALL',...new Set(Object.values(CONFIG.stageTokens)),'UNKNOWN'];},
+    readURL(){
+      const params=new URLSearchParams(location.search),region=(params.get('region')||CONFIG.defaultRegion).toUpperCase(),stage=(params.get('stage')||CONFIG.defaultStage).toUpperCase(),period=Number(params.get('period')||CONFIG.defaultPeriod);
+      State.region=this.regionOptions().includes(region)?region:CONFIG.defaultRegion;
+      State.stage=this.stageOptions().includes(stage)?stage:CONFIG.defaultStage;
+      State.period=CONFIG.periods.includes(period)?period:CONFIG.defaultPeriod;
+    },
+    viewURL(){
+      // Never forward encrypted qs, credentials or subscriber context from the current URL.
+      // A configured canonical URL also avoids breaking SFMC routes when stripping a query.
+      try{
+        const base=CONFIG.shareBaseUrl||(CONFIG.dataMode==='sample'&&/^https?:$/.test(location.protocol)?location.origin+location.pathname:'');
+        if(!base)return null;
+        const url=new URL(base,location.href);
+        if(url.origin!==location.origin||url.username||url.password||!/^https?:$/.test(url.protocol)||(CONFIG.dataMode!=='sample'&&url.protocol!=='https:'))return null;
+        if([...url.searchParams.keys()].some(k=>/^(qs|token|access_token|subscriberkey|subscriberid|email)$/i.test(k)))return null;
+        url.hash='';url.searchParams.set('region',State.region);url.searchParams.set('stage',State.stage);url.searchParams.set('period',String(State.period));return url;
+      }catch{return null;}
+    },
+    writeURL(){if(!/^https?:$/.test(location.protocol))return;const url=new URL(location.href);url.searchParams.set('region',State.region);url.searchParams.set('stage',State.stage);url.searchParams.set('period',String(State.period));try{history.replaceState(null,'',url);}catch{}},
+    sync(){
+      $('region').value=State.region;$('stage').value=State.stage;$('period').value=String(State.period);
+      const regionLabel=Naming.regionLabel(State.region),stageLabel=Naming.stageLabel(State.stage),p=selectedPeriod();
+      $('report-title').textContent=State.region==='ALL'?CONFIG.title:regionLabel+' email performance';
+      $('hero-description').textContent=State.region==='ALL'?'A clear view of your campaigns, engagement and audience.':'Campaign results for '+regionLabel+', with consistent metrics and clear comparisons.';
+      $('scope-name').textContent=regionLabel;$('scope-stage').textContent=stageLabel;
+      $('scope-note').textContent='Campaign market identified from email names. '+(p.complete?'Summary covers all matching jobs in this period.':'Summary covers matching loaded jobs only.');
+      $('coverage-notice').hidden=p.complete;
+      $('coverage-notice').textContent='Partial campaign data: this snapshot does not contain every job in the selected period. Cards, chart and exports describe the loaded set only. Comparisons are unavailable; no loaded match does not prove there were no sends.';
+      $('naming-notice').hidden=!p.unclassifiedRegion&&!p.unclassifiedStage;
+      $('naming-notice').textContent=`Naming coverage: ${num(p.unclassifiedRegion)} loaded jobs have an unclassified region; ${num(p.unclassifiedStage)} have an unclassified stage. Unknown codes stay included in the relevant All view.`;
+      const filtered=State.region!=='ALL'||State.stage!=='ALL',hasAudience=!!State.data.audience;
+      $('audience').hidden=filtered||!hasAudience;
+      $('audience-filtered').hidden=!filtered;
+      $('audience-loader').hidden=filtered||hasAudience;
+      $('audience-nav').hidden=filtered;
+      $('audience-filtered').querySelector('p').textContent='Audience and journey snapshots are available in the All EMEA, all-stages view. They cannot be split by campaign name.';
+      $('show-all').hidden=!filtered;
+      Audience.renderLoader();
+      $('reset-filters').disabled=State.region===CONFIG.defaultRegion&&State.stage===CONFIG.defaultStage&&State.period===CONFIG.defaultPeriod&&!State.query&&State.sort==='newest';
+      $('copy-view').disabled=!this.viewURL();
+      $('copy-view').title=$('copy-view').disabled?'View links become available when the published reporting address is configured.':'Copy a link with the current region, stage and period.';
+    },
+    change(){State.page=1;App.renderPeriod();this.writeURL();App.announce(`${Naming.regionLabel(State.region)}, ${Naming.stageLabel(State.stage)}, last ${State.period} days.`);},
+    async copy(){
+      const view=this.viewURL();if(!view)return;const url=view.href;
+      try{if(!navigator.clipboard?.writeText)throw new Error('Clipboard unavailable');await navigator.clipboard.writeText(url);App.announce('View link copied.');}
+      catch{$('view-link-input').value=url;$('view-link-dialog').showModal();$('view-link-input').focus();$('view-link-input').select();}
+    },
+    init(){
+      this.readURL();
+      $('region').innerHTML=this.regionOptions().map(code=>`<option value="${code}">${esc(Naming.regionLabel(code))}${code!=='ALL'&&code!=='UNKNOWN'?' ('+code+')':''}</option>`).join('');
+      $('stage').innerHTML=['ALL','PARENT','REMAIL','UNKNOWN'].map(code=>`<option value="${code}" ${this.stageOptions().includes(code)?'':'disabled'}>${esc(Naming.stageLabel(code))}${code==='REMAIL'&&!this.stageOptions().includes(code)?' (code unconfirmed)':''}</option>`).join('');
+      $('region').addEventListener('change',e=>{State.region=e.target.value;this.change();});
+      $('stage').addEventListener('change',e=>{State.stage=e.target.value;this.change();});
+      $('reset-filters').addEventListener('click',()=>{State.region=CONFIG.defaultRegion;State.stage=CONFIG.defaultStage;State.period=CONFIG.defaultPeriod;State.query='';State.sort='newest';$('search').value='';$('sort').value='newest';this.change();});
+      $('show-all').addEventListener('click',()=>{State.region='ALL';State.stage='ALL';this.change();(State.data.audience?$('audience'):$('audience-loader')).scrollIntoView({behavior:'auto'});});
+      $('copy-view').addEventListener('click',()=>this.copy());
+      window.addEventListener('popstate',()=>{this.readURL();State.page=1;App.renderPeriod();});
+    }
+  };
+
+  /* 10. APP ORCHESTRATION. No polling, external dependencies or hidden refresh. */
+  const App = {
+    announce(message){$('announcement').textContent=message;$('announcement').hidden=false;clearTimeout(this.announcementTimer);this.announcementTimer=setTimeout(()=>$('announcement').hidden=true,3000);},
+    renderPeriod(){State.report=Report.build();Filters.sync();Metrics.render();Chart.render();Campaigns.render();},
+    init(){
+      $('retry-report').addEventListener('click',()=>this.load());
+      $('export').disabled=true;
+      this.load();
+    },
+    loading:false,
+    async load(){
+      if(this.loading)return;
+      this.loading=true;
+      $('report-body').hidden=true;$('export').disabled=true;
+      $('retry-report').hidden=true;$('load-error').hidden=true;$('report-loading').hidden=false;
+      try{
+        State.data=await DataProvider.load();
+        this.mount();
+      }catch(error){
+        $('report-loading').hidden=true;$('retry-report').hidden=false;$('report-body').hidden=true;$('export').disabled=true;$('refresh-label').textContent='Report unavailable';
+        $('mode-badge').textContent='Unavailable';$('mode-note').textContent='No reporting data loaded.';
+        $('load-error').textContent=Transport.message(error)+' No figures are being displayed.';$('load-error').hidden=false;
+        Transport.retryButton($('retry-report'),error,'Retry campaign report');
+        console.error('Reporting initialisation failed:',error.message);
+      }finally{this.loading=false;}
+    },
+    mount(){
+      Filters.init();Audience.init();
+        $('report-title').textContent=CONFIG.title;
+        $('workspace-name').textContent=CONFIG.regionLabel+' reporting';
+        $('breadcrumb-name').textContent=CONFIG.regionLabel+' email reporting';
+        $('footer-brand').textContent='Hertz · '+CONFIG.regionLabel+' marketing intelligence';
+        $('period').innerHTML=CONFIG.periods.map(n=>`<option value="${n}" ${n===State.period?'selected':''}>Last ${n} days</option>`).join('');
+        const sample=CONFIG.dataMode==='sample';
+        $('sample-chip').hidden=!sample;
+        $('mode-badge').textContent=sample?'Sample data':'Reporting snapshot';
+        $('mode-note').innerHTML=sample?'Design concept<br>Illustrative figures only':'Scheduled refresh<br>Aggregated reporting';
+        $('refresh-label').textContent=(sample?'Sample retrieved · ':'Retrieved · ')+dateTime(State.data.meta.generatedAt);
+        $('footer-scope').textContent=`${sample?'Sample report · ':''}Data through ${dayLabel(State.data.meta.throughDate,true)} · ${CONFIG.reportingTimeZone}`;
+        if(!sample)$('sample-definition').textContent='This report uses the supplied reporting snapshot. No illustrative figures are substituted if data is missing.';
+        Freshness.render();
+        $('period').addEventListener('change',e=>{State.period=Number(e.target.value);Filters.change();});
+        $('search').addEventListener('input',e=>{State.query=e.target.value;State.page=1;Campaigns.render();Filters.sync();});
+        $('sort').addEventListener('change',e=>{State.sort=e.target.value;State.page=1;Campaigns.render();Filters.sync();});
+        $('prev').addEventListener('click',()=>{State.page--;Campaigns.render();});
+        $('next').addEventListener('click',()=>{State.page++;Campaigns.render();});
+        $('export').addEventListener('click',()=>Campaigns.export());
+        document.querySelectorAll('[data-chart]').forEach(b=>b.addEventListener('click',()=>{State.chart=b.dataset.chart;Chart.render();}));
+        $('campaign-rows').addEventListener('click',e=>{const b=e.target.closest('[data-job]');if(b)Campaigns.detail(Number(b.dataset.job));});
+        document.querySelectorAll('[data-dialog]').forEach(b=>b.addEventListener('click',()=>$('definitions-dialog').showModal()));
+        document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',()=>b.closest('dialog').close()));
+        const navLinks=[...document.querySelectorAll('.nav a')];
+        const setNav=id=>navLinks.forEach(a=>{const active=a.hash==='#'+id;a.classList.toggle('active',active);if(active)a.setAttribute('aria-current','location');else a.removeAttribute('aria-current');});
+        let navFrame=0;
+        window.addEventListener('scroll',()=>{if(navFrame)return;navFrame=requestAnimationFrame(()=>{const section=['audience','campaigns'].find(id=>!$(id).hidden&&$(id).getBoundingClientRect().top<150)||'overview';setNav(section);navFrame=0;});},{passive:true});
+        $('report-loading').hidden=true;$('report-body').hidden=false;this.renderPeriod();if(State.data.audience)Audience.render();
+        let chartResizeTimer;window.addEventListener('resize',()=>{clearTimeout(chartResizeTimer);chartResizeTimer=setTimeout(()=>Chart.render(),120);});
+    }
+  };
+  App.init();
+})();
+</script>
+</body>
+</html>
